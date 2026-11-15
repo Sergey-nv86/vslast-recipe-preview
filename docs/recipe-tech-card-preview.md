@@ -1,4 +1,10 @@
-# Recipe technology cards — preview setup
+# Recipe technology cards — isolated preview setup
+
+## Current development phase: on-device OCR
+
+The current UI performs only local OCR in the browser using Tesseract.js 5.1.1 and the Russian `rus` language model. Recognition runs on the user's device in WebAssembly; selected photos are converted to data URLs in memory and are not sent to Supabase or Gemini during OCR. The first run downloads the OCR engine, WebAssembly core and Russian trained data from public CDNs; Tesseract.js caches language data in browser IndexedDB. Internet access is therefore required for the first initialization. Cloud AI parsing is intentionally not connected to the screen until iPhone OCR testing is accepted.
+
+The source branch imported from `vslast-premium` is a baseline snapshot. Uncommitted local-only changes from the Mac working tree were not present on GitHub and are not claimed as transferred.
 
 This feature is isolated on branch feature/recipe-tech-card-ai-20261113.
 
@@ -6,15 +12,16 @@ This feature is isolated on branch feature/recipe-tech-card-ai-20261113.
 
 - Admin / production roles can open «Технологические карты» from the admin dashboard.
 - The screen accepts up to eight recipe photos.
-- The recipe-tech-card Edge Function validates the signed-in Supabase user and role, reads the ingredient catalogue, sends the photos to the Gemini API with JSON output, and returns structured recipe data.
+- The current screen extracts editable Russian text locally from up to eight photos. It does not call the recipe-tech-card Edge Function.
+- The existing recipe-tech-card Edge Function is retained for a later AI phase, but is not invoked by the current OCR-only UI.
 - Ingredient names not found in the catalogue are inserted with needs_review = true.
 - Missing prices are collected in the app before the TTK is saved.
 - Price conversion is limited to compatible dimensions: kg/g, l/ml, and pcs.
 - The app stores the recipe, gross quantity, optional net quantity/loss, technology, storage guidance, quality description, yield, cost and nutrition fields.
 
-## Required server secret
+## Cloud AI phase — intentionally paused
 
-Create a Gemini API key in Google AI Studio (https://aistudio.google.com/) and set GEMINI_API_KEY as an Edge Function secret in the separate preview Supabase project only. Never put it in Flutter source, app configuration, GitHub, or a client-side environment file.
+Do not add or expose `GEMINI_API_KEY` during the OCR-only phase. The cloud function remains separate and unused by the screen. AI integration begins only after local OCR has been tested and accepted on iPhone.
 
 Optional: GEMINI_MODEL — defaults to gemini-3.8-flash. The official Gemini pricing page lists free standard input and output for this model, subject to rate limits. Do not link a paid billing account or enable paid usage for this prototype. Free-tier prompts/responses may be used by Google to improve its products; use non-confidential sample recipes until you have reviewed the data terms. Free-tier prompts/responses may be used by Google to improve its products; do not upload confidential recipes or customer data without reviewing those terms.
 
@@ -25,7 +32,7 @@ The function performs its own auth.getUser(token) check because platform JWT ver
 1. The isolated preview project has already received the profile bootstrap and recipe TTK migrations.
 2. The recipe-tech-card Edge Function has already been deployed to the preview project.
 3. Add GEMINI_API_KEY to the preview project's Edge Function secrets when the key is generated.
-4. Security advisors have been checked; no security lints remain. Performance output currently contains only unused-index informational notices before workload.
+4. The isolated preview database is separate from production. No production Supabase project is modified by this repository.
 5. Build the Flutter preview app on the Mac and test with sample recipes before considering any production merge.
 
 Do not apply this migration or deploy the function to vslast-production until the preview has been accepted.
@@ -69,9 +76,14 @@ For iPhone installation, open `ios/Runner.xcworkspace` in Xcode, select the iPho
 
 The first registration may require email confirmation depending on the Auth email settings. The profile trigger assigns owner only to the first account in this isolated preview project; the function is not executable through the public Data API. After confirmation, sign in with the same test email/password. No production users or data are present in this project.
 
-## Remaining before first real AI request
+## Remaining before AI integration
 
-1. Add `GEMINI_API_KEY` as an Edge Function secret in this preview project. Do not add it to GitHub or Flutter.
-2. Register the first preview user and sign in.
-3. Build the preview app on the Mac and install it on the iPhone.
-4. Test several photographed recipes, verify extraction, unit conversions, ingredient prices, TTK saving and cost per entered quantity.
+1. Build and deploy this isolated preview to the preview Firebase site only after validation.
+2. Test Russian OCR on iPhone Safari with printed, photographed and slightly rotated recipe pages.
+3. Check text quality, memory use, first-run loading time and repeat-run cache behavior.
+4. Correct OCR problems before connecting any cloud AI.
+
+## Later AI phase (do not execute yet)
+
+1. Only after OCR acceptance, decide whether to enable the existing preview Edge Function.
+2. Keep any AI key in the preview Supabase Edge Function secrets, never in GitHub or Flutter.
