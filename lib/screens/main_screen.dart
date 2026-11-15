@@ -1,0 +1,164 @@
+import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+
+import '../models/product.dart';
+import '../features/bake_schedule/screens/bake_schedule_screen.dart';
+import '../features/home/screens/home_screen.dart';
+import '../features/home/widgets/bottom_nav_bar.dart';
+import '../features/promotions/screens/promotions_screen.dart';
+import '../providers/tab_navigation_controller.dart';
+import '../services/product_service.dart';
+import '../widgets/adaptive_layout.dart';
+import 'desktop_main_screen.dart';
+import 'catalog_screen.dart';
+import 'loyalty_screen.dart';
+
+class MainScreen extends StatefulWidget {
+  final List<Product> products;
+
+  const MainScreen({super.key, this.products = const []});
+
+  @override
+  State<MainScreen> createState() => _MainScreenState();
+}
+
+class _MainScreenState extends State<MainScreen> {
+  late List<Product> _products;
+  bool _isLoadingProducts = false;
+  late List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+
+    // Приоритет источников:
+    // 1. товары, переданные из Splash;
+    // 2. последний успешно загруженный список из ProductService cache;
+    // 3. загрузка из Supabase, если cache пуст.
+    final cachedProducts = ProductService.instance.cachedCatalogProducts;
+
+    if (widget.products.isNotEmpty) {
+      _products = List<Product>.of(widget.products);
+      debugPrint('MAIN INITIAL SOURCE: widget');
+    } else if (cachedProducts != null && cachedProducts.isNotEmpty) {
+      _products = List<Product>.of(cachedProducts);
+      debugPrint('MAIN INITIAL SOURCE: cache');
+    } else {
+      _products = <Product>[];
+      debugPrint('MAIN INITIAL SOURCE: network');
+    }
+
+    debugPrint('===== MAIN INIT =====');
+    debugPrint('MAIN INITIAL PRODUCTS: ${_products.length}');
+    debugPrint(
+      'MAIN INITIAL IN STOCK COUNT: '
+      '${_products.where((product) => product.inStock).length}',
+    );
+
+    _pages = List<Widget>.generate(5, (_) => const SizedBox.shrink());
+
+    // Only the initially visible page is constructed at startup.
+    _pages[0] = HomeScreen(
+      products: _products,
+      isLoading: _isLoadingProducts,
+    );
+
+    if (_products.isEmpty) {
+      _loadProducts();
+    }
+  }
+
+  Future<void> _loadProducts() async {
+    if (_isLoadingProducts) return;
+
+    setState(() {
+      _isLoadingProducts = true;
+    });
+
+    try {
+      final products = await ProductService.instance.getCatalogProducts();
+
+      if (!mounted) return;
+
+      setState(() {
+        _products = products;
+        _isLoadingProducts = false;
+        _pages[0] = HomeScreen(
+          products: _products,
+          isLoading: false,
+        );
+      });
+
+      debugPrint('===== MAIN PRODUCT LOAD SUCCESS =====');
+      debugPrint('MAIN PRODUCTS COUNT: ${_products.length}');
+      debugPrint(
+        'MAIN IN STOCK COUNT: '
+        '${_products.where((product) => product.inStock).length}',
+      );
+    } catch (error, stackTrace) {
+      debugPrint('===== MAIN PRODUCT LOAD ERROR =====');
+      debugPrint('$error');
+      debugPrint('$stackTrace');
+
+      if (!mounted) return;
+
+      setState(() {
+        _isLoadingProducts = false;
+      });
+    }
+  }
+
+  void _ensurePage(int index) {
+    if (index == 0 || _pages[index] is! SizedBox) return;
+
+    _pages[index] = switch (index) {
+      1 => const CatalogScreen(),
+      2 => const BakeScheduleScreen(),
+      3 => const PromotionsScreen(),
+      4 => const LoyaltyScreen(),
+      _ => const SizedBox.shrink(),
+    };
+  }
+
+  List<Widget> _ensureAndGetPages(int index) {
+    _ensurePage(index);
+    return _pages;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    debugPrint('===== MAIN BUILD =====');
+    debugPrint('MAIN PRODUCTS COUNT: ${_products.length}');
+
+    final currentIndex = context.watch<TabNavigationController>().currentIndex;
+
+    final mobile = Scaffold(
+      backgroundColor: const Color(0xFFFAF8F5),
+      body: IndexedStack(
+        index: currentIndex,
+        children: _ensureAndGetPages(currentIndex),
+      ),
+      bottomNavigationBar: PremiumBottomNavBar(
+        currentIndex: currentIndex,
+        onTap: (index) {
+          if (index != 0) {
+            _ensurePage(index);
+          }
+          context.read<TabNavigationController>().setIndex(index);
+        },
+      ),
+    );
+
+    return AdaptiveLayout(
+      mobile: mobile,
+      tablet: DesktopMainScreen(
+        products: _products,
+        isLoading: _isLoadingProducts,
+      ),
+      desktop: DesktopMainScreen(
+        products: _products,
+        isLoading: _isLoadingProducts,
+      ),
+    );
+  }
+}

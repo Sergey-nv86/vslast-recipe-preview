@@ -1,0 +1,192 @@
+import 'dart:async';
+import 'dart:js_interop';
+
+import 'package:flutter/foundation.dart';
+
+import 'package:web/web.dart' as web;
+
+Future<void> showForegroundNotification({
+  required String title,
+  required String body,
+  Map<String, String>? data,
+}) async {
+  try {
+    final permission = web.Notification.permission;
+
+    if (permission != 'granted') {
+      return;
+    }
+
+    final notification = web.Notification(
+      title,
+      web.NotificationOptions(body: body, icon: '/icons/Icon-192.png'),
+    );
+
+    final navigationData = data ?? const <String, String>{};
+    final pushType = navigationData['type']?.trim() ?? '';
+    final orderId = navigationData['order_id']?.trim() ?? '';
+    final productId = navigationData['product_id']?.trim() ?? '';
+    final threadId = navigationData['thread_id']?.trim() ?? '';
+    final messageId = navigationData['message_id']?.trim() ?? '';
+    final clientId = navigationData['client_id']?.trim() ?? '';
+    final clientUserId = navigationData['client_user_id']?.trim() ?? '';
+    final promotionId = navigationData['promotion_id']?.trim() ?? '';
+    final assortmentDate = navigationData['assortment_date']?.trim() ?? '';
+    final cartId = navigationData['cart_id']?.trim() ?? '';
+
+    if (pushType.isNotEmpty ||
+        orderId.isNotEmpty ||
+        productId.isNotEmpty ||
+        threadId.isNotEmpty ||
+        messageId.isNotEmpty ||
+        clientId.isNotEmpty ||
+        clientUserId.isNotEmpty ||
+        promotionId.isNotEmpty ||
+        assortmentDate.isNotEmpty ||
+        cartId.isNotEmpty) {
+      final query = <String, String>{};
+
+      if (pushType.isNotEmpty) {
+        query['push_type'] = pushType;
+      }
+
+      if (orderId.isNotEmpty) {
+        query['order_id'] = orderId;
+      }
+
+      if (productId.isNotEmpty) {
+        query['product_id'] = productId;
+      }
+
+      if (threadId.isNotEmpty) query['thread_id'] = threadId;
+      if (messageId.isNotEmpty) query['message_id'] = messageId;
+      if (clientId.isNotEmpty) query['client_id'] = clientId;
+      if (clientUserId.isNotEmpty) query['client_user_id'] = clientUserId;
+      if (promotionId.isNotEmpty) query['promotion_id'] = promotionId;
+      if (assortmentDate.isNotEmpty) query['assortment_date'] = assortmentDate;
+      if (cartId.isNotEmpty) query['cart_id'] = cartId;
+
+      final targetUrl = Uri(
+        path: '/',
+        queryParameters: query,
+      ).toString();
+
+      notification.addEventListener(
+        'click',
+        ((web.Event _) {
+          notification.close();
+          web.window.location.assign(targetUrl);
+        }).toJS,
+      );
+    }
+  } catch (_) {
+    // Foreground notification is best-effort on Web.
+  }
+}
+
+/// Слушает сообщения от Firebase Service Worker для навигации после клика.
+///
+/// Service Worker передаёт полный набор навигационных данных:
+/// {
+///   type: 'push_navigation',
+///   push_type: 'cart_abandoned',
+///   order_id: '...',
+///   product_id: '...'
+/// }
+///
+/// Важно: приложение не перезапускается при клике по push в уже открытом PWA.
+StreamSubscription<web.MessageEvent> listenServiceWorkerPushNavigation(
+  void Function(Map<String, String> data) onNavigation,
+) {
+  final controller = web.window.navigator.serviceWorker;
+  final streamController = StreamController<web.MessageEvent>();
+
+  controller.addEventListener(
+    'message',
+    (web.Event event) {
+      streamController.add(event as web.MessageEvent);
+    }.toJS,
+  );
+
+  return streamController.stream.listen((web.MessageEvent event) {
+    try {
+      final data = event.data;
+
+      if (data == null) {
+        return;
+      }
+
+      final dartData = data.dartify();
+
+      if (dartData is! Map) {
+        return;
+      }
+
+      final type = dartData['type']?.toString() ?? '';
+      if (type != 'push_navigation') {
+        return;
+      }
+
+      final navigation = <String, String>{
+        'type': dartData['push_type']?.toString() ?? '',
+        'order_id': dartData['order_id']?.toString() ?? '',
+        'product_id': dartData['product_id']?.toString() ?? '',
+        'thread_id': dartData['thread_id']?.toString() ?? '',
+        'message_id': dartData['message_id']?.toString() ?? '',
+        'client_id': dartData['client_id']?.toString() ?? '',
+        'client_user_id': dartData['client_user_id']?.toString() ?? '',
+        'promotion_id': dartData['promotion_id']?.toString() ?? '',
+        'assortment_date': dartData['assortment_date']?.toString() ?? '',
+        'cart_id': dartData['cart_id']?.toString() ?? '',
+      };
+
+      debugPrint('[Push] Service Worker navigation: $navigation');
+      onNavigation(navigation);
+    } catch (error, stackTrace) {
+      debugPrint('[Push] Service Worker navigation error: $error');
+      debugPrint('$stackTrace');
+    }
+  });
+}
+
+/// Слушает старый формат order click.
+///
+/// Оставлен для обратной совместимости с существующим кодом.
+StreamSubscription<web.MessageEvent> listenServiceWorkerMessages(
+  void Function(String orderId) onOrderClick,
+) {
+  return web.window.onMessage.listen((web.MessageEvent event) {
+    try {
+      final data = event.data;
+
+      if (data == null) {
+        return;
+      }
+
+      final dartData = data.dartify();
+
+      if (dartData is! Map) {
+        return;
+      }
+
+      final type = dartData['type']?.toString() ?? '';
+
+      if (type != 'push_order_click') {
+        return;
+      }
+
+      final orderId = dartData['order_id']?.toString() ?? '';
+
+      if (orderId.isEmpty) {
+        return;
+      }
+
+      debugPrint('[Push] Service Worker click received: order_id=$orderId');
+
+      onOrderClick(orderId);
+    } catch (error, stackTrace) {
+      debugPrint('[Push] Service Worker message error: $error');
+      debugPrint('$stackTrace');
+    }
+  });
+}

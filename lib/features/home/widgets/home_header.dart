@@ -1,0 +1,446 @@
+import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:provider/provider.dart';
+
+import '../../../providers/auth_provider.dart';
+import '../../../providers/location_provider.dart';
+import '../../../screens/auth_screen.dart';
+import '../../../screens/about_screen.dart';
+import '../../../screens/cart_screen.dart';
+import '../../../screens/chat_screen.dart';
+import '../../../screens/favorite_screen.dart';
+import '../../../screens/orders_screen.dart';
+import '../../../screens/profile_screen.dart';
+import '../../../theme/app_theme.dart';
+import '../../../widgets/product_image.dart';
+
+class HomeHeader extends StatelessWidget {
+  const HomeHeader({super.key});
+
+  void _openProfileMenu(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadii.sheet),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: AppSpacing.xs),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              _ProfileMenuTile(
+                icon: Icons.menu,
+                label: 'Профиль',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  final auth = context.read<AuthProvider>();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => auth.isLoggedIn
+                          ? const ProfileScreen()
+                          : const AuthScreen(initialMode: AuthMode.login),
+                    ),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.favorite_border,
+                label: 'Избранное',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const FavoriteScreen()),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.location_on_outlined,
+                label: 'Город',
+                value: context.read<LocationProvider>().city,
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _pickCity(context);
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.receipt_long_outlined,
+                label: 'Мои заказы',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const OrdersScreen()),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.chat_bubble_outline_rounded,
+                label: 'Чат с «Всласть»',
+                trailing: const ChatUnreadBadge(),
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  final auth = context.read<AuthProvider>();
+                  if (!auth.isLoggedIn) {
+                    Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => const AuthScreen(initialMode: AuthMode.login),
+                      ),
+                    );
+                    return;
+                  }
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const ClientChatScreen()),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.shopping_bag_outlined,
+                label: 'Моя корзина',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const CartScreen()),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.info_outline,
+                label: 'О нас',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AboutScreen()),
+                  );
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.phone_outlined,
+                label: 'Контакты',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showContacts(context);
+                },
+              ),
+              _ProfileMenuTile(
+                icon: Icons.handshake_outlined,
+                label: 'Сотрудничество',
+                onTap: () {
+                  Navigator.pop(sheetContext);
+                  _showComingSoon(context, 'Сотрудничество');
+                },
+              ),
+              const SizedBox(height: AppSpacing.xs),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _showContacts(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      showDragHandle: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadii.sheet),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Контакты', style: AppTextStyles.screenTitle),
+                const SizedBox(height: 18),
+                Text(
+                  'г. Нижневартовск, ул. Пионерская, 12',
+                  style: AppTextStyles.rowLabel,
+                ),
+                const SizedBox(height: 8),
+                Text('+7 (912) 939-97-54', style: AppTextStyles.rowLabel),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: () async {
+                      final uri = Uri.parse('tel:+79129399754');
+
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri);
+                      }
+                    },
+                    icon: const Icon(Icons.phone_outlined),
+                    label: const Text('Позвонить'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showComingSoon(BuildContext context, String title) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            '$title — раздел будет доступен в ближайшее время',
+            style: const TextStyle(
+              fontFamily: 'PlayfairDisplay',
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+  }
+
+  void _pickCity(BuildContext context) {
+    final location = context.read<LocationProvider>();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.cardBackground,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(AppRadii.sheet),
+        ),
+      ),
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: AppSpacing.xs),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.divider,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text('Ваш город', style: AppTextStyles.sectionLabel),
+                ),
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              for (final city in LocationProvider.availableCities)
+                ListTile(
+                  title: Text(city, style: AppTextStyles.rowLabel),
+                  trailing: city == location.city
+                      ? const Icon(Icons.check, color: AppColors.caramel)
+                      : null,
+                  onTap: () {
+                    if (city != 'Нижневартовск') {
+                      Navigator.pop(sheetContext);
+
+                      ScaffoldMessenger.of(context)
+                        ..hideCurrentSnackBar()
+                        ..showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Доступно пока только в Нижневартовске.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+
+                      return;
+                    }
+
+                    location.setCity(city);
+                    Navigator.pop(sheetContext);
+                  },
+                ),
+              const SizedBox(height: AppSpacing.xs),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildGreeting(BuildContext context) {
+    return Text(
+      'Добро пожаловать\nв пекарню Всласть',
+      style: AppTextStyles.screenTitleSmall.copyWith(
+        color: AppColors.primaryBrown,
+        fontSize: MediaQuery.sizeOf(context).width >= 1200 ? 24 : 18,
+        height: 1.05,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final top = MediaQuery.of(context).padding.top;
+    final width = MediaQuery.sizeOf(context).width;
+    final photoHeight =
+        width >= 1200 ? 210.0 : width >= 760 ? 185.0 : 160.0;
+    final desktop = width >= 760;
+
+    return SizedBox(
+      width: double.infinity,
+      height: top + photoHeight,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ProductImage(
+            imageUrl: 'assets/images/hero_banner.jpg',
+            fit: BoxFit.cover,
+            iconSize: 40,
+          ),
+          Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomLeft,
+                  end: Alignment.topRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.84),
+                    Colors.white.withValues(alpha: 0.30),
+                    Colors.transparent,
+                  ],
+                  stops: const [0, 0.52, 1],
+                ),
+              ),
+            ),
+          ),
+          if (!desktop)
+            Positioned(
+              left: AppSpacing.lg,
+              top: top + 2,
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(22),
+                  onTap: () => _openProfileMenu(context),
+                  child: SizedBox(
+                    width: 52,
+                    height: 48,
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        const SizedBox(
+                          width: 44,
+                          height: 44,
+                          child: Center(
+                            child: Icon(
+                              Icons.menu,
+                              size: 25,
+                              color: AppColors.primaryBrown,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: const ChatUnreadBadge(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          Positioned(
+            left: AppSpacing.lg,
+            top: top + (desktop ? 34 : 58),
+            right: 24,
+            child: _buildGreeting(context),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileMenuTile extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String? value;
+  final Widget? trailing;
+  final VoidCallback onTap;
+
+  const _ProfileMenuTile({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.value,
+    this.trailing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.lg,
+          vertical: AppSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36,
+              height: 36,
+              decoration: const BoxDecoration(
+                color: AppColors.cream,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, size: 18, color: AppColors.primaryBrown),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                label,
+                style: const TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 18.0,
+                  fontWeight: FontWeight.w500,
+                  height: 1.2,
+                  color: AppColors.primaryBrown,
+                ),
+              ),
+            ),
+            if (value != null) ...[
+              Text(value!, style: AppTextStyles.rowLabelMuted),
+              const SizedBox(width: AppSpacing.xs),
+            ],
+            if (trailing != null) ...[
+              trailing!,
+              const SizedBox(width: AppSpacing.xs),
+            ],
+            const Icon(Icons.chevron_right, color: AppColors.textSecondary),
+          ],
+        ),
+      ),
+    );
+  }
+}

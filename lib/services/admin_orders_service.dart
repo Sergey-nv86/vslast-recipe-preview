@@ -1,0 +1,884 @@
+import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+
+import '../features/admin/screens/admin_orders_screen.dart';
+import '../services/bakery_service.dart';
+
+class AdminOrdersService {
+  AdminOrdersService._();
+
+  static final AdminOrdersService instance = AdminOrdersService._();
+
+  final SupabaseClient _supabase = Supabase.instance.client;
+
+  Future<List<AdminOrder>> fetchOrders() async {
+    // Список заказов должен быть быстрым: изображения и данные products
+    // загружаются только при открытии конкретного заказа. Лёгкие позиции
+    // (название/количество/цена) загружаются отдельно для календаря товаров.
+    final response = await _supabase
+        .from('orders')
+        .select('''
+          id,
+          order_number,
+          user_id,
+          client_id,
+          status,
+          delivery_method,
+          payment_method,
+          pickup_date,
+          pickup_time_slot,
+          comment,
+          pickup_discount,
+          total,
+          created_at
+        ''')
+        .order('created_at', ascending: false);
+
+    final rows = List<Map<String, dynamic>>.from(response);
+
+    // Для списка заказов нужны только лёгкие позиции: название, количество,
+    // цена и сумма. Изображения/товары products здесь намеренно НЕ загружаем.
+    // Это одновременно делает календарь товаров корректным и сохраняет
+    // быстрый список заказов.
+    final orderIds = rows
+        .map((row) => row['id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final userIds = rows
+        .map((row) => row['user_id']?.toString())
+        .whereType<String>()
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    final profilesById = <String, Map<String, dynamic>>{};
+    final itemsByOrderId = <String, List<Map<String, dynamic>>>{};
+
+    // Профили и позиции независимы — загружаем их параллельно,
+    // чтобы не удваивать время ожидания Supabase.
+    final results = await Future.wait<dynamic>([
+      if (userIds.isNotEmpty)
+        _supabase
+            .from('profiles')
+            .select('id, display_name, first_name, last_name, phone')
+            .inFilter('id', userIds),
+      if (orderIds.isNotEmpty)
+        _supabase
+            .from('order_items')
+            .select('''
+              id,
+              order_id,
+              product_id,
+              product_name,
+              unit_price,
+              quantity,
+              weight_label,
+              line_total
+            ''')
+            .inFilter('order_id', orderIds)
+            .order('id'),
+    ]);
+
+    var resultIndex = 0;
+
+    if (userIds.isNotEmpty) {
+      final profilesResponse = results[resultIndex++];
+      for (final profile in profilesResponse) {
+        final map = Map<String, dynamic>.from(profile as Map);
+        final id = map['id']?.toString();
+        if (id != null && id.isNotEmpty) {
+          profilesById[id] = map;
+        }
+      }
+    }
+
+    if (orderIds.isNotEmpty) {
+      final itemsResponse = results[resultIndex++];
+      for (final item in itemsResponse) {
+        final map = Map<String, dynamic>.from(item as Map);
+        final orderId = map['order_id']?.toString();
+        if (orderId == null || orderId.isEmpty) continue;
+        (itemsByOrderId[orderId] ??= <Map<String, dynamic>>[]).add(map);
+      }
+    }
+
+    return rows.map((row) {
+      final userId = row['user_id']?.toString() ?? '';
+      final orderId = row['id']?.toString() ?? '';
+
+      if (itemsByOrderId.containsKey(orderId)) {
+        row['order_items'] = itemsByOrderId[orderId];
+      }
+
+      return _mapOrder(row, profile: profilesById[userId]);
+    }).toList();
+  }
+
+  /// Возвращает невыданные заказы клиента по номеру карты лояльности.
+  ///
+  /// QR клиента содержит card_number.
+  /// Сначала находим user_id в loyalty_accounts,
+  /// затем загружаем только активные заказы этого клиента.
+  /// Загружает один заказ по UUID.
+  ///
+  /// Используется для открытия конкретного заказа из push-уведомления.
+  /// В отличие от fetchOrders() не загружает весь список заказов.
+  Future<AdminOrder?> fetchOrderById(String orderId) async {
+    final normalizedOrderId = orderId.trim();
+
+    if (normalizedOrderId.isEmpty) {
+      throw Exception('Не указан ID заказа');
+    }
+
+    debugPrint(
+      'ADMIN PUSH ORDER: загрузка заказа '
+      'order_id=$normalizedOrderId',
+    );
+
+    final response = await _supabase
+        .from('orders')
+        .select('''
+          id,
+          order_number,
+          user_id,
+          client_id,
+          status,
+          delivery_method,
+          payment_method,
+          pickup_date,
+          pickup_time_slot,
+          delivery_address,
+          delivery_cost,
+          comment,
+          items_total,
+          pickup_discount,
+          total,
+          created_at,
+          updated_at,
+          order_items (
+            id,
+            product_id,
+            product_name,
+            unit_price,
+            quantity,
+            weight_label,
+            line_total,
+            products:product_id (
+              id,
+              name,
+              image_url,
+              gallery_images
+            )
+          )
+        ''')
+        .eq('id', normalizedOrderId)
+        .maybeSingle();
+
+    if (response == null) {
+      debugPrint(
+        'ADMIN PUSH ORDER: заказ не найден '
+        'order_id=$normalizedOrderId',
+      );
+      return null;
+    }
+
+    final row = Map<String, dynamic>.from(response);
+
+    // Надёжность: если PostgREST не вернул вложенный order_items,
+    // добираем позиции отдельным запросом. Сам заказ при этом не теряется.
+    if (row['order_items'] is! List || (row['order_items'] as List).isEmpty) {
+      row['order_items'] = await _fetchOrderItems(normalizedOrderId);
+    }
+
+    final userId = row['user_id']?.toString().trim() ?? '';
+
+    Map<String, dynamic>? profile;
+
+    if (userId.isNotEmpty) {
+      final profileResponse = await _supabase
+          .from('profiles')
+          .select('id, display_name, first_name, last_name, phone, email')
+          .eq('id', userId)
+          .maybeSingle();
+
+      if (profileResponse != null) {
+        profile = Map<String, dynamic>.from(profileResponse);
+      }
+    }
+
+    final bakery = await BakeryService.instance.getActiveBakery();
+
+    final order = _mapOrder(row, profile: profile, bakery: bakery);
+
+    debugPrint(
+      'ADMIN PUSH ORDER: заказ загружен '
+      'number=${order.number}, '
+      'order_id=${order.id}',
+    );
+
+    return order;
+  }
+
+  Future<List<AdminOrder>> fetchActiveOrdersByCardNumber(
+    String cardNumber,
+  ) async {
+    var normalizedCardNumber = cardNumber.trim().toUpperCase();
+
+    // Нормализуем все поддерживаемые форматы клиентского QR.
+    //
+    // Поддерживаем:
+    // VSL-31471850
+    // VSLAST|CARD|VSL-31471850
+    // VSLAST|CARD|31471850
+    // 31471850
+    // VSL31471850
+    normalizedCardNumber = normalizedCardNumber.trim();
+
+    final embeddedCard = RegExp(
+      r'(VSL-\d{8})',
+      caseSensitive: false,
+    ).firstMatch(normalizedCardNumber);
+
+    if (embeddedCard != null) {
+      normalizedCardNumber = embeddedCard.group(1)!.toUpperCase();
+    } else {
+      final qrMatch = RegExp(
+        r'VSLAST\|CARD\|([^|\s]+)',
+        caseSensitive: false,
+      ).firstMatch(normalizedCardNumber);
+
+      if (qrMatch != null) {
+        normalizedCardNumber = qrMatch.group(1)!.trim().toUpperCase();
+      }
+
+      normalizedCardNumber = normalizedCardNumber.replaceAll(
+        RegExp(r'\s+'),
+        '',
+      );
+
+      if (RegExp(r'^\d{8}$').hasMatch(normalizedCardNumber)) {
+        normalizedCardNumber = 'VSL-$normalizedCardNumber';
+      }
+
+      final withoutDash = RegExp(
+        r'^VSL(\d{8})$',
+        caseSensitive: false,
+      ).firstMatch(normalizedCardNumber);
+
+      if (withoutDash != null) {
+        normalizedCardNumber = 'VSL-${withoutDash.group(1)}';
+      }
+    }
+
+    if (normalizedCardNumber.isEmpty) {
+      throw Exception('Не указан номер карты клиента');
+    }
+
+    debugPrint(
+      'ADMIN QR ORDERS: поиск клиента по карте '
+      'card_number=$normalizedCardNumber',
+    );
+
+    final account = await _supabase
+        .from('loyalty_accounts')
+        .select('id, user_id, client_id, card_number')
+        .eq('card_number', normalizedCardNumber)
+        .maybeSingle();
+
+    if (account == null) {
+      debugPrint(
+        'ADMIN QR ORDERS: карта не найдена '
+        'card_number=$normalizedCardNumber',
+      );
+
+      throw Exception('Карта $normalizedCardNumber не найдена');
+    }
+
+    final userId = account['user_id']?.toString().trim() ?? '';
+
+    if (userId.isEmpty) {
+      throw Exception('Для карты $normalizedCardNumber не найден клиент');
+    }
+
+    debugPrint(
+      'ADMIN QR ORDERS: карта найдена, '
+      'user_id=$userId',
+    );
+
+    return fetchActiveOrdersByCustomer(userId);
+  }
+
+  /// Возвращает только невыданные/незавершённые заказы конкретного клиента.
+  ///
+  /// Используется после сканирования QR-кода клиента.
+  /// QR содержит номер карты loyalty_accounts.card_number.
+  /// После определения user_id загружаются только активные заказы этого клиента.
+  Future<List<AdminOrder>> fetchActiveOrdersByCustomer(String userId) async {
+    final normalizedUserId = userId.trim();
+
+    if (normalizedUserId.isEmpty) {
+      throw Exception('Не указан клиент');
+    }
+
+    debugPrint(
+      'ADMIN QR ORDERS: загрузка активных заказов клиента '
+      'user_id=$normalizedUserId',
+    );
+
+    final response = await _supabase
+        .from('orders')
+        .select('''
+          id,
+          order_number,
+          user_id,
+          client_id,
+          status,
+          delivery_method,
+          payment_method,
+          pickup_date,
+          pickup_time_slot,
+          delivery_address,
+          delivery_cost,
+          comment,
+          items_total,
+          pickup_discount,
+          total,
+          created_at,
+          updated_at,
+          order_items (
+            id,
+            product_id,
+            product_name,
+            unit_price,
+            quantity,
+            weight_label,
+            line_total,
+            products:product_id (
+              id,
+              image_url,
+              gallery_images
+            )
+          )
+        ''')
+        .eq('user_id', normalizedUserId)
+        .order('created_at', ascending: false);
+
+    final rows = List<Map<String, dynamic>>.from(response);
+
+    for (final row in rows) {
+      final orderId = row['id']?.toString().trim() ?? '';
+      final rawItems = row['order_items'];
+      if (orderId.isEmpty || (rawItems is List && rawItems.isNotEmpty)) {
+        continue;
+      }
+      row['order_items'] = await _fetchOrderItems(orderId);
+    }
+
+    debugPrint('ADMIN QR ORDERS: заказов клиента = ${rows.length}');
+
+    const finishedStatuses = {
+      'completed',
+      'cancelled',
+      'canceled',
+      'rejected',
+      'issued',
+      'picked_up',
+      'pickedup',
+      'delivered',
+    };
+
+    final activeRows = rows.where((row) {
+      final status = row['status']?.toString().trim().toLowerCase() ?? '';
+      return !finishedStatuses.contains(status);
+    }).toList();
+
+    debugPrint('ADMIN QR ORDERS: активных заказов = ${activeRows.length}');
+
+    if (activeRows.isEmpty) {
+      return [];
+    }
+
+    final profileResponse = await _supabase
+        .from('profiles')
+        .select('id, display_name, first_name, last_name, phone, email')
+        .eq('id', normalizedUserId)
+        .maybeSingle();
+
+    final profile = profileResponse == null
+        ? null
+        : Map<String, dynamic>.from(profileResponse);
+
+    final bakery = await BakeryService.instance.getActiveBakery();
+
+    return activeRows
+        .map((row) => _mapOrder(row, profile: profile, bakery: bakery))
+        .toList();
+  }
+
+  /// Статистика заказов для главного экрана администратора.
+  ///
+  /// total — незавершённые заказы, которые должны быть получены сегодня.
+  /// newOrders — новые заказы на сегодня.
+  Future<Map<String, int>> fetchOrderStats() async {
+    const finishedStatuses = ['completed', 'cancelled', 'canceled', 'rejected'];
+    const newStatuses = ['new', 'processing', 'pending', 'pending_confirmation',
+      'awaiting_confirmation', 'awaiting_payment', 'awaitingpayment'];
+
+    final totalResponse = await _supabase
+        .from('orders')
+        .select('id')
+        .not('status', 'in', '(${finishedStatuses.join(',')})')
+        .count();
+
+    final newResponse = await _supabase
+        .from('orders')
+        .select('id')
+        .inFilter('status', newStatuses)
+        .count();
+
+    return {
+      'total': totalResponse.count,
+      'new': newResponse.count,
+    };
+  }
+  AdminOrder _mapOrder(
+    Map<String, dynamic> row, {
+    Map<String, dynamic>? profile,
+    Bakery? bakery,
+  }) {
+    final rawItems = row['order_items'];
+
+    final items = rawItems is List
+        ? rawItems
+              .map((item) => Map<String, dynamic>.from(item as Map))
+              .map(_mapItem)
+              .toList()
+        : <AdminOrderItem>[];
+
+    final customerProfile = profile ?? const <String, dynamic>{};
+
+    final displayName =
+        customerProfile['display_name']?.toString().trim() ?? '';
+
+    final firstName = customerProfile['first_name']?.toString().trim() ?? '';
+
+    final lastName = customerProfile['last_name']?.toString().trim() ?? '';
+
+    final customerName = displayName.isNotEmpty
+        ? displayName
+        : [firstName, lastName].where((value) => value.isNotEmpty).join(' ');
+
+    final clientId = row['client_id']?.toString().trim() ?? '';
+
+    final customerPhone = customerProfile['phone']?.toString().trim() ?? '';
+
+    final deliveryMethod = row['delivery_method']?.toString() ?? 'pickup';
+
+    final pickupDate = row['pickup_date']?.toString() ?? '';
+
+    final pickupTimeSlot = row['pickup_time_slot']?.toString() ?? '';
+
+    final status = row['status']?.toString() ?? 'pending_confirmation';
+
+    final pickupAddressTitle = bakery != null
+        ? bakery.name
+        : 'Пекарня «Всласть»';
+
+    final pickupAddressSubtitle = bakery != null
+        ? [
+            if (bakery.city.isNotEmpty) bakery.city,
+            if (bakery.address.isNotEmpty) bakery.address,
+          ].join(', ')
+        : 'Адрес не указан';
+
+    return AdminOrder(
+      id: row['id']?.toString() ?? '',
+      number: '#${_toInt(row['order_number'])}',
+
+      customer: clientId.isNotEmpty
+          ? 'Клиент $clientId'
+          : (customerName.isNotEmpty ? customerName : 'Клиент'),
+
+      phone: customerPhone,
+
+      customerType: 'Клиент',
+      customerOrderCount: 1,
+
+      time: _formatCreatedAt(row['created_at']),
+
+      type: _buildType(deliveryMethod, pickupTimeSlot),
+
+      receiveTimeDetail: _buildReceiveTimeDetail(
+        deliveryMethod,
+        pickupDate,
+        pickupTimeSlot,
+      ),
+
+      pickupDate: DateTime.tryParse(pickupDate),
+
+      // Предзаказ — это тип заказа, а не отдельный статус.
+      // Реальный статус БД сохраняем без подмены:
+      // processing -> Новый
+      // confirmed -> Подтверждён
+      // completed -> Выполнен
+      status: _mapStatus(status),
+
+      total: _toDouble(row['total']),
+
+      discount: _toDouble(row['pickup_discount']),
+
+      comment: _nullableString(row['comment']),
+
+      isPreorder: _isPreorder(pickupDate, row['created_at']),
+
+      items: items,
+      pickupAddressTitle: pickupAddressTitle,
+      pickupAddressSubtitle: pickupAddressSubtitle,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchOrderItems(String orderId) async {
+    final response = await _supabase
+        .from('order_items')
+        .select('''
+          id,
+          order_id,
+          product_id,
+          product_name,
+          unit_price,
+          quantity,
+          weight_label,
+          line_total,
+          products:product_id (
+            id,
+            name,
+            image_url,
+            gallery_images
+          )
+        ''')
+        .eq('order_id', orderId)
+        .order('id');
+
+    return List<Map<String, dynamic>>.from(response);
+  }
+
+  AdminOrderItem _mapItem(Map<String, dynamic> row) {
+    final rawProduct = row['products'];
+
+    final product = rawProduct is Map
+        ? Map<String, dynamic>.from(rawProduct)
+        : (rawProduct is List &&
+              rawProduct.isNotEmpty &&
+              rawProduct.first is Map)
+        ? Map<String, dynamic>.from(rawProduct.first as Map)
+        : <String, dynamic>{};
+
+    var imageUrl = product['image_url']?.toString().trim() ?? '';
+
+    if (imageUrl.isEmpty && product['gallery_images'] is List) {
+      final gallery = List<dynamic>.from(product['gallery_images'] as List);
+      final firstImage = gallery
+          .map((value) => value?.toString().trim() ?? '')
+          .firstWhere((value) => value.isNotEmpty, orElse: () => '');
+      imageUrl = firstImage;
+    }
+
+    final storedName = row['product_name']?.toString().trim() ?? '';
+    final currentProductName = product['name']?.toString().trim() ?? '';
+    final name = storedName.isNotEmpty
+        ? storedName
+        : (currentProductName.isNotEmpty ? currentProductName : 'Товар');
+
+    final weight = row['weight_label']?.toString().trim() ?? '';
+
+    final quantity = _toInt(row['quantity']);
+    final unitPrice = _toDouble(row['unit_price']);
+    final lineTotal = _toDouble(row['line_total']);
+
+    debugPrint(
+      'ADMIN ORDER ITEM: '
+      'name=$name, '
+      'quantity=$quantity, '
+      'unitPrice=$unitPrice, '
+      'lineTotal=$lineTotal',
+    );
+
+    final calculatedLineTotal = unitPrice * quantity;
+
+    if ((lineTotal - calculatedLineTotal).abs() > 0.01) {
+      debugPrint(
+        'WARNING: line_total отличается от расчёта: '
+        'db=$lineTotal '
+        'calculated=$calculatedLineTotal',
+      );
+    }
+
+    return AdminOrderItem(
+      name: name.isNotEmpty ? name : 'Товар',
+      weight: weight,
+      quantity: quantity,
+      price: unitPrice,
+      imageUrl: imageUrl,
+    );
+  }
+
+  String? _nullableString(dynamic value) {
+    if (value == null) {
+      return null;
+    }
+
+    final result = value.toString().trim();
+
+    if (result.isEmpty) {
+      return null;
+    }
+
+    return result;
+  }
+
+  String _mapStatus(String status) {
+    switch (status) {
+      case 'pending_confirmation':
+      case 'processing':
+      case 'new':
+      case 'pending':
+      case 'awaiting_confirmation':
+        return 'Новый';
+
+      case 'confirmed':
+        return 'Подтверждён';
+
+      case 'awaitingPayment':
+      case 'awaiting_payment':
+        return 'Ожидает оплаты';
+
+      case 'paid':
+        return 'Оплачен';
+
+      case 'ready':
+        return 'Готов';
+
+      case 'in_progress':
+      case 'inProgress':
+      case 'working':
+        return 'В работе';
+
+      case 'completed':
+      case 'done':
+        return 'Выполнен';
+
+      case 'cancelled':
+      case 'canceled':
+        return 'Отменён';
+
+      default:
+        return 'Новый';
+    }
+  }
+
+  String _buildType(String deliveryMethod, String pickupTimeSlot) {
+    if (deliveryMethod == 'pickup') {
+      if (pickupTimeSlot.isNotEmpty) {
+        return 'Самовывоз · $pickupTimeSlot';
+      }
+
+      return 'Самовывоз';
+    }
+
+    return 'Доставка';
+  }
+
+  String _buildReceiveTimeDetail(
+    String deliveryMethod,
+    String pickupDate,
+    String pickupTimeSlot,
+  ) {
+    if (deliveryMethod == 'pickup') {
+      if (pickupDate.isNotEmpty && pickupTimeSlot.isNotEmpty) {
+        return '${_formatDate(pickupDate)}, '
+            'с $pickupTimeSlot';
+      }
+
+      if (pickupDate.isNotEmpty) {
+        return _formatDate(pickupDate);
+      }
+
+      return '';
+    }
+
+    return 'Доставка';
+  }
+
+  bool _isPreorder(String pickupDate, dynamic createdAt) {
+    if (pickupDate.isEmpty || createdAt == null) {
+      return false;
+    }
+
+    final pickup = DateTime.tryParse(pickupDate);
+
+    final created = DateTime.tryParse(createdAt.toString());
+
+    if (pickup == null || created == null) {
+      return false;
+    }
+
+    final localCreated = created.toLocal();
+
+    final createdDate = DateTime(
+      localCreated.year,
+      localCreated.month,
+      localCreated.day,
+    );
+
+    return pickup.isAfter(createdDate);
+  }
+
+  String _formatCreatedAt(dynamic value) {
+    final date = DateTime.tryParse(value?.toString() ?? '');
+
+    if (date == null) {
+      return '';
+    }
+
+    final local = date.toLocal();
+
+    final day = local.day.toString().padLeft(2, '0');
+
+    final month = local.month.toString().padLeft(2, '0');
+
+    final hour = local.hour.toString().padLeft(2, '0');
+
+    final minute = local.minute.toString().padLeft(2, '0');
+
+    return '$day.$month, $hour:$minute';
+  }
+
+  String _formatDate(String value) {
+    final date = DateTime.tryParse(value);
+
+    if (date == null) {
+      return value;
+    }
+
+    final day = date.day.toString().padLeft(2, '0');
+
+    final month = date.month.toString().padLeft(2, '0');
+
+    final year = date.year.toString();
+
+    return '$day.$month.$year';
+  }
+
+  int _toInt(dynamic value) {
+    if (value is int) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toInt();
+    }
+
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  double _toDouble(dynamic value) {
+    if (value is double) {
+      return value;
+    }
+
+    if (value is num) {
+      return value.toDouble();
+    }
+
+    return double.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  /// Изменяет статус реального заказа в Supabase.
+  ///
+  /// Рабочий цикл:
+  /// pending_confirmation -> confirmed -> completed
+  ///
+  /// Важно: UPDATE выполняется с SELECT изменённой строки.
+  /// Это позволяет обнаружить ситуацию, когда RLS не разрешает
+  /// обновление и Supabase возвращает 0 изменённых строк без ошибки.
+  Future<void> updateOrderStatus({
+    required String orderId,
+    required String status,
+  }) async {
+    final normalizedOrderId = orderId.trim();
+    final normalizedStatus = status.trim();
+
+    if (normalizedOrderId.isEmpty) {
+      throw Exception('Не указан id заказа');
+    }
+
+    if (normalizedStatus.isEmpty) {
+      throw Exception('Не указан новый статус заказа');
+    }
+
+    debugPrint(
+      'ADMIN ORDER STATUS UPDATE START: '
+      'id=$normalizedOrderId, status=$normalizedStatus',
+    );
+
+    final currentUser = _supabase.auth.currentUser;
+
+    debugPrint(
+      'ADMIN AUTH DEBUG: '
+      'userId=${currentUser?.id}, '
+      'email=${currentUser?.email}, '
+      'phone=${currentUser?.phone}',
+    );
+
+    try {
+      final result = await _supabase
+          .from('orders')
+          .update({
+            'status': normalizedStatus,
+            'updated_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('id', normalizedOrderId)
+          .select('id,status')
+          .maybeSingle();
+
+      debugPrint('ADMIN ORDER STATUS UPDATE RESPONSE: $result');
+
+      if (result == null) {
+        throw Exception(
+          'Supabase не изменил заказ. '
+          'Возможна проблема с RLS UPDATE policy '
+          'или неверный id заказа.',
+        );
+      }
+
+      final savedId = result['id']?.toString() ?? '';
+      final savedStatus = result['status']?.toString() ?? '';
+
+      debugPrint(
+        'ADMIN ORDER STATUS UPDATE SAVED: '
+        'id=$savedId, status=$savedStatus',
+      );
+
+      if (savedStatus != normalizedStatus) {
+        throw Exception(
+          'Статус не сохранён. '
+          'Ожидался "$normalizedStatus", получен "$savedStatus".',
+        );
+      }
+    } on PostgrestException catch (e) {
+      debugPrint(
+        'ADMIN ORDER STATUS POSTGREST ERROR: '
+        'code=${e.code}, message=${e.message}, '
+        'details=${e.details}, hint=${e.hint}',
+      );
+
+      throw Exception('Ошибка Supabase: ${e.message}');
+    } catch (e) {
+      debugPrint('ADMIN ORDER STATUS ERROR: $e');
+      rethrow;
+    }
+  }
+}
