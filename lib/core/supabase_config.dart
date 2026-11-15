@@ -1,12 +1,12 @@
 class SupabaseConfig {
-  // Production remains the default. Preview builds override these at compile time.
+  // This repository is an isolated preview. Never fall back to production.
   static const String url = String.fromEnvironment(
     'SUPABASE_URL',
-    defaultValue: 'https://hcisinnackmcijghrtsa.supabase.co',
+    defaultValue: 'https://lpuzgzgyxqfwnwpfbefw.supabase.co',
   );
 
   static const String publishableKey = String.fromEnvironment(
     'SUPABASE_PUBLISHABLE_KEY',
-    defaultValue: 'sb_publishable__mFECEGceujEPpU1yI2g2A_elVI63hE',
+    defaultValue: 'sb_publishable_VSsRlb6ITGZrWa6oz70HsQ_mQkfJfJi',
   );
 }
