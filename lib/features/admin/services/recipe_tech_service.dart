@@ -7,7 +7,16 @@ class RecipeTechService {
   final SupabaseClient _db = Supabase.instance.client;
 
   Future<Map<String, dynamic>> analyze(List<Map<String, dynamic>> images) async {
-    final response = await _db.functions.invoke('recipe-tech-card', body: {'images': images});
+    final response = await _db.functions
+        .invoke('recipe-tech-card', body: {'images': images})
+        .timeout(
+          const Duration(seconds: 55),
+          onTimeout: () {
+            throw Exception(
+              'Сервер не ответил за 55 секунд. Попробуйте уменьшить размер фотографий и повторить анализ.',
+            );
+          },
+        );
     final data = Map<String, dynamic>.from(response.data as Map);
     if (response.status < 200 || response.status >= 300 || data['error'] != null) {
       throw Exception(data['error'] ?? 'Ошибка анализа рецепта');
@@ -32,7 +41,6 @@ class RecipeTechService {
 
   Future<void> saveCard({required String name, required String technology, required String? storageConditions, required String? qualityDescription, required num? yieldQuantity, required String? yieldUnit, required List<Map<String, dynamic>> items, required num? totalCost, required Map<String, dynamic>? nutritionPer100, required String nutritionStatus, required String calculationStatus, required int photoCount}) async {
     final userId = _db.auth.currentUser?.id;
-    if (userId == null) throw Exception('Требуется авторизация');
     final card = await _db.from('recipe_tech_cards').insert({
       'name': name, 'technology': technology, 'storage_conditions': storageConditions, 'quality_description': qualityDescription, 'yield_quantity': yieldQuantity, 'yield_unit': yieldUnit,
       'total_cost': totalCost, 'calories_per_100': nutritionPer100?['calories'],
