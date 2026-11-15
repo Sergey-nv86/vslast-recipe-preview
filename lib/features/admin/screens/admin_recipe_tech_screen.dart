@@ -1,7 +1,7 @@
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/recipe_tech_service.dart';
+import '../services/local_recipe_ocr_service.dart';
 
 class AdminRecipeTechScreen extends StatefulWidget {
   const AdminRecipeTechScreen({super.key});
@@ -16,6 +16,7 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
   static const muted = Color(0xFF806F65);
   final picker = ImagePicker();
   final photos = <XFile>[];
+  final ocrController = TextEditingController();
   Map<String, dynamic>? result;
   bool busy = false;
   String? error;
@@ -30,37 +31,44 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
     try {
       if (camera) {
         final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 82, maxWidth: 2200);
-        if (file != null && mounted) setState(() => photos.add(file));
+        if (file != null && mounted) setState(() { photos.add(file); ocrController.clear(); });
       } else {
         final files = await picker.pickMultiImage(imageQuality: 82, maxWidth: 2200);
         if (mounted) {
           final remaining = 8 - photos.length;
-          setState(() => photos.addAll(files.take(remaining)));
+          setState(() { photos.addAll(files.take(remaining)); ocrController.clear(); });
           if (files.length > remaining) showError('Добавлены первые 8 фотографий');
         }
       }
     } catch (e) { showError('Не удалось добавить фото: ' + e.toString()); }
   }
 
-  Future<void> calculate() async {
+  Future<void> recognizeLocally() async {
     if (photos.isEmpty || busy) return;
-    if (photos.length > 8) { showError('Можно добавить не более 8 фотографий'); return; }
-    setState(() { busy = true; error = null; result = null; });
+    if (photos.length > 8) {
+      showError('Можно добавить не более 8 фотографий');
+      return;
+    }
+    setState(() {
+      busy = true;
+      error = null;
+      result = null;
+      ocrController.clear();
+    });
     try {
-      final images = <Map<String, dynamic>>[];
-      for (final file in photos) {
-        final lower = file.name.toLowerCase();
-        final mime = lower.endsWith('.png') ? 'image/png' : lower.endsWith('.webp') ? 'image/webp' : 'image/jpeg';
-        images.add({'mime_type': mime, 'data': base64Encode(await file.readAsBytes())});
-      }
-      final data = await RecipeTechService.instance.analyze(images);
+      final text = await LocalRecipeOcrService.instance.recognize(photos);
       if (!mounted) return;
-      setState(() => result = data);
-      await collectPrices();
-      if (mounted) await askNameQuantitySave();
+      if (text.trim().isEmpty) {
+        throw Exception('Текст не распознан. Попробуйте сфотографировать страницу ровнее и при хорошем освещении.');
+      }
+      setState(() => ocrController.text = text);
     } catch (e) {
-      if (mounted) setState(() => error = e.toString().replaceFirst('Exception: ', ''));
-    } finally { if (mounted) setState(() => busy = false); }
+      if (mounted) {
+        setState(() => error = e.toString().replaceFirst('Exception: ', ''));
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
   }
 
   double? toBase(num q, String unit, String base) {
@@ -122,7 +130,7 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
         const SizedBox(height: 10),
         TextField(controller: quantity, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Количество в упаковке', border: OutlineInputBorder())),
         const SizedBox(height: 10),
-        DropdownButtonFormField<String>(value: units.contains(unit) ? unit : units.first, decoration: const InputDecoration(labelText: 'Единица измерения', border: OutlineInputBorder()), items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(), onChanged: (v) => refresh(() => unit = v ?? unit)),
+        DropdownButtonFormField<String>(initialValue: units.contains(unit) ? unit : units.first, decoration: const InputDecoration(labelText: 'Единица измерения', border: OutlineInputBorder()), items: units.map((u) => DropdownMenuItem(value: u, child: Text(u))).toList(), onChanged: (v) => refresh(() => unit = v ?? unit)),
         const SizedBox(height: 6),
         const Text('Введите цену и размер упаковки', style: TextStyle(fontSize: 12, color: muted)),
       ]),
@@ -195,6 +203,12 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
   }
 
   @override
+  void dispose() {
+    ocrController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final analysis = result?['analysis'] is Map ? Map<String, dynamic>.from(result!['analysis'] as Map) : null;
     final nutrition = result?['nutrition_per_100'] is Map ? Map<String, dynamic>.from(result!['nutrition_per_100'] as Map) : null;
@@ -211,16 +225,45 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
             OutlinedButton.icon(onPressed: busy ? null : () => addPhoto(true), icon: const Icon(Icons.camera_alt_outlined), label: const Text('Камера')),
             OutlinedButton.icon(onPressed: busy ? null : () => addPhoto(false), icon: const Icon(Icons.photo_library_outlined), label: const Text('Галерея')),
           ]),
-          ...photos.asMap().entries.map((e) => ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.image_outlined, color: brown), title: Text(e.value.name, maxLines: 1, overflow: TextOverflow.ellipsis), trailing: IconButton(onPressed: busy ? null : () => setState(() => photos.removeAt(e.key)), icon: const Icon(Icons.close)))),
+          ...photos.asMap().entries.map((e) => ListTile(dense: true, contentPadding: EdgeInsets.zero, leading: const Icon(Icons.image_outlined, color: brown), title: Text(e.value.name, maxLines: 1, overflow: TextOverflow.ellipsis), trailing: IconButton(onPressed: busy ? null : () => setState(() { photos.removeAt(e.key); ocrController.clear(); }), icon: const Icon(Icons.close)))),
           const SizedBox(height: 8),
           SizedBox(width: double.infinity, height: 50, child: ElevatedButton.icon(
-            onPressed: photos.isEmpty || busy ? null : calculate,
+            onPressed: photos.isEmpty || busy ? null : recognizeLocally,
             style: ElevatedButton.styleFrom(backgroundColor: brown, foregroundColor: Colors.white),
-            icon: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.calculate_outlined),
-            label: Text(busy ? 'Анализирую рецепт…' : 'Рассчитать'),
+            icon: busy ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.document_scanner_outlined),
+            label: Text(busy ? 'Распознаю на устройстве…' : 'Распознать текст локально'),
           )),
         ]))),
         if (error != null) Padding(padding: const EdgeInsets.only(top: 12), child: Text(error!, style: const TextStyle(color: Colors.red))),
+        if (ocrController.text.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          Card(
+            color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Распознанный текст рецепта', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: dark)),
+                  const SizedBox(height: 6),
+                  const Text('Распознавание выполнено на устройстве. Фотографии не отправлялись на сервер. Проверьте и исправьте текст перед следующим этапом.', style: TextStyle(color: muted, height: 1.4)),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: ocrController,
+                    minLines: 8,
+                    maxLines: 24,
+                    keyboardType: TextInputType.multiline,
+                    decoration: const InputDecoration(
+                      hintText: 'Здесь появится текст рецепта',
+                      border: OutlineInputBorder(),
+                      alignLabelWithHint: true,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
         if (analysis != null) ...[
           const SizedBox(height: 16),
           Card(color: Colors.white, child: Padding(padding: const EdgeInsets.all(16), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
