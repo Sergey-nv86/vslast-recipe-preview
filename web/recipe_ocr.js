@@ -38,17 +38,27 @@
     const worker = await getWorker();
     const pages = [];
 
-    for (let index = 0; index < images.length; index += 1) {
-      const image = images[index];
-      if (typeof image !== 'string' || !image.startsWith('data:image/')) {
-        throw new Error('Некорректный формат фотографии №' + (index + 1));
+    try {
+      for (let index = 0; index < images.length; index += 1) {
+        const image = images[index];
+        if (typeof image !== 'string' || !image.startsWith('data:image/')) {
+          throw new Error('Некорректный формат фотографии №' + (index + 1));
+        }
+
+        const result = await worker.recognize(image);
+        const text = (result.data.text || '').trim();
+        pages.push('Страница ' + (index + 1) + '\\n' + text);
       }
 
-      const result = await worker.recognize(image);
-      const text = (result.data.text || '').trim();
-      pages.push('Страница ' + (index + 1) + '\n' + text);
+      return pages.join('\\n\\n');
+    } finally {
+      // Release the WebAssembly heap after each batch to reduce memory
+      // pressure in iOS Safari. Tesseract caches the trained language data.
+      try {
+        await worker.terminate();
+      } finally {
+        workerPromise = null;
+      }
     }
-
-    return pages.join('\n\n');
   };
 })();
