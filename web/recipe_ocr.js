@@ -179,8 +179,8 @@
       if (hasTwoColumns) {
         left.sort(function (a, b) { return a.y0 - b.y0; });
         right.sort(function (a, b) { return a.y0 - b.y0; });
-        ordered.push.apply(ordered, left, []);
-        ordered.push.apply(ordered, right, []);
+        ordered.push.apply(ordered, left);
+        ordered.push.apply(ordered, right);
       } else {
         band.sort(function (a, b) {
           return a.y0 === b.y0 ? a.x0 - b.x0 : a.y0 - b.y0;
@@ -243,20 +243,25 @@
   async function recognizePage(worker, dataUrl) {
     const image = await loadImage(dataUrl);
     const sourceWidth = image.naturalWidth || image.width;
+    let scale = sourceWidth < TARGET_IMAGE_WIDTH
+      ? Math.min(TARGET_IMAGE_WIDTH / sourceWidth, 2.5)
+      : 1;
+    scale = Math.min(scale, MAX_IMAGE_WIDTH / sourceWidth);
+    const processedWidth = Math.max(1, Math.round(sourceWidth * scale));
     const enhanced = makeCanvas(image, false);
     const modes = [3, 11, 6];
     let best = { text: '', score: -1, confidence: 0 };
 
     for (const mode of modes) {
       const candidate = await recognizeWithMode(
-        worker, enhanced, mode, sourceWidth
+        worker, enhanced, mode, processedWidth
       );
       if (candidate.score > best.score) best = candidate;
     }
 
     if (best.confidence < 68 || best.text.length < 80) {
       const binary = makeCanvas(image, true);
-      const candidate = await recognizeWithMode(worker, binary, 3, sourceWidth);
+      const candidate = await recognizeWithMode(worker, binary, 3, processedWidth);
       if (candidate.score > best.score) best = candidate;
     }
     return best.text;
