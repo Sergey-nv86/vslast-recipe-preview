@@ -103,9 +103,118 @@
     return canvas.toDataURL('image/png');
   }
 
-  function assess(result) {
-    const text = (result.data.text || '').trim();
-    const lines = text.split(/\r?\n/).filter(function (line) {
+  function wordLineKey(word, index) {
+    if (word.block_num !== undefined && word.par_num !== undefined &&
+        word.line_num !== undefined) {
+      return [word.block_num, word.par_num, word.line_num].join(':');
+    }
+    const box = word.bbox || {};
+    return 'y:' + Math.round(((box.y0 || 0) + (box.y1 || 0)) / 2 / 12) +
+      ':' + index;
+  }
+
+  function lineFromWords(words) {
+    const sorted = words.slice().sort(function (a, b) {
+      return (a.bbox.x0 || 0) - (b.bbox.x0 || 0);
+    });
+    const text = sorted.map(function (word) {
+      return String(word.text || '').trim();
+    }).filter(Boolean).join(' ');
+    const boxes = sorted.map(function (word) { return word.bbox || {}; });
+    return {
+      text: text,
+      x0: Math.min.apply(null, boxes.map(function (box) { return box.x0 || 0; })),
+      x1: Math.max.apply(null, boxes.map(function (box) { return box.x1 || 0; })),
+      y0: Math.min.apply(null, boxes.map(function (box) { return box.y0 || 0; })),
+      y1: Math.max.apply(null, boxes.map(function (box) { return box.y1 || 0; }))
+    };
+  }
+
+  // Rebuild reading order from word coordinates. In a two-column recipe,
+  // read the left column top-to-bottom, then the right column, not row-by-row.
+  function reconstructReadingOrder(result, pageWidth) {
+    const words = (result.data && result.data.words) || [];
+    if (!words.length) return (result.data && result.data.text) || '';
+
+    const groups = new Map();
+    words.forEach(function (word, index) {
+      const key = wordLineKey(word, index);
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(word);
+    });
+
+    const lines = Array.from(groups.values()).map(lineFromWords)
+      .filter(function (line) { return line.text.length > 0; })
+      .sort(function (a, b) {
+        return a.y0 === b.y0 ? a.x0 - b.x0 : a.y0 - b.y0;
+      });
+
+    if (!lines.length) return (result.data && result.data.text) || '';
+
+    // A wide heading or full-width instruction separates page bands.
+    const spanning = lines.filter(function (line) {
+      return line.x1 - line.x0 >= pageWidth * 0.58;
+    });
+    const ordered = [];
+    let band = [];
+
+    function flushBand() {
+      if (!band.length) return;
+      const left = [];
+      const right = [];
+      band.forEach(function (line) {
+        const center = (line.x0 + line.x1) / 2;
+        (center < pageWidth * 0.5 ? left : right).push(line);
+      });
+      const hasTwoColumns = left.length >= 2 && right.length >= 2 &&
+        Math.abs(
+          left.reduce(function (sum, line) {
+            return sum + (line.x0 + line.x1) / 2;
+          }, 0) / left.length -
+          right.reduce(function (sum, line) {
+            return sum + (line.x0 + line.x1) / 2;
+          }, 0) / right.length
+        ) > pageWidth * 0.2;
+
+      if (hasTwoColumns) {
+        left.sort(function (a, b) { return a.y0 - b.y0; });
+        right.sort(function (a, b) { return a.y0 - b.y0; });
+        ordered.push.apply(ordered, left, []);
+        ordered.push.apply(ordered, right, []);
+      } else {
+        band.sort(function (a, b) {
+          return a.y0 === b.y0 ? a.x0 - b.x0 : a.y0 - b.y0;
+        });
+        ordered.push.apply(ordered, band);
+      }
+      band = [];
+    }
+
+    lines.forEach(function (line) {
+      if (spanning.indexOf(line) !== -1) {
+        flushBand();
+        ordered.push(line);
+      } else {
+        band.push(line);
+      }
+    });
+    flushBand();
+
+    return ordered.map(function (line) { return line.text; }).join('\n');
+  }
+
+  function normalizeOcrText(text) {
+    return String(text || '')
+      .replace(/\r/g, '')
+      .replace(/([А-Яа-яЁё])- *\n *([а-яё])/g, '$1$2')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function assess(result, pageWidth) {
+    const text = normalizeOcrText(reconstructReadingOrder(result, pageWidth));
+    const lines = text.split(/\n/).filter(function (line) {
       return line.trim().length > 0;
     });
     const words = text.match(/[А-Яа-яЁёA-Za-z0-9]+/g) || [];
@@ -116,31 +225,38 @@
     const penalty = Math.min(18, suspicious.length * 0.7);
     const structure = Math.min(8, lines.length * 0.12) +
       Math.min(8, words.length * 0.035) + Math.min(5, density * 1.5);
-    return { text: text, score: confidence + structure - penalty, confidence: confidence };
+    return {
+      text: text,
+      score: confidence + structure - penalty,
+      confidence: confidence
+    };
   }
 
-  async function recognizeWithMode(worker, image, mode) {
+  async function recognizeWithMode(worker, image, mode, pageWidth) {
     await worker.setParameters({
       tessedit_pageseg_mode: String(mode),
       preserve_interword_spaces: '1'
     });
-    return assess(await worker.recognize(image));
+    return assess(await worker.recognize(image), pageWidth);
   }
 
   async function recognizePage(worker, dataUrl) {
     const image = await loadImage(dataUrl);
+    const sourceWidth = image.naturalWidth || image.width;
     const enhanced = makeCanvas(image, false);
-    const modes = [3, 6, 11];
+    const modes = [3, 11, 6];
     let best = { text: '', score: -1, confidence: 0 };
 
     for (const mode of modes) {
-      const candidate = await recognizeWithMode(worker, enhanced, mode);
+      const candidate = await recognizeWithMode(
+        worker, enhanced, mode, sourceWidth
+      );
       if (candidate.score > best.score) best = candidate;
     }
 
     if (best.confidence < 68 || best.text.length < 80) {
       const binary = makeCanvas(image, true);
-      const candidate = await recognizeWithMode(worker, binary, 3);
+      const candidate = await recognizeWithMode(worker, binary, 3, sourceWidth);
       if (candidate.score > best.score) best = candidate;
     }
     return best.text;
