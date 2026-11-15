@@ -45,8 +45,18 @@ returns trigger
 language plpgsql
 as $$
 begin
-  if tg_op = 'INSERT'
-     or new.purchase_price is distinct from old.purchase_price
+  if tg_op = 'INSERT' then
+    insert into public.ingredient_price_history (
+      ingredient_id, supplier_name, package_label, purchase_quantity,
+      purchase_unit, purchase_price, price_per_base_unit, price_valid_from,
+      price_source, changed_by
+    ) values (
+      new.ingredient_id, new.supplier_name, new.package_label,
+      new.purchase_quantity, new.purchase_unit, new.purchase_price,
+      new.price_per_base_unit, new.price_valid_from, new.price_source,
+      auth.uid()
+    );
+  elsif new.purchase_price is distinct from old.purchase_price
      or new.purchase_quantity is distinct from old.purchase_quantity
      or new.purchase_unit is distinct from old.purchase_unit
      or new.supplier_name is distinct from old.supplier_name
@@ -72,3 +82,5 @@ drop trigger if exists ingredient_price_history_after_change on public.ingredien
 create trigger ingredient_price_history_after_change
 after insert or update on public.ingredient_prices
 for each row execute function public.record_ingredient_price_history();
+
+revoke all on function public.record_ingredient_price_history() from public, anon, authenticated;
