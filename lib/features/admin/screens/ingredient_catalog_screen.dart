@@ -139,11 +139,17 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
               final normalized=normalize(ingredientName);
               final matches=await db.from('ingredients').select('id,base_unit').eq('normalized_name',normalized).limit(1);
               String id;
+              String base;
               if((matches as List).isEmpty){
-                final base=(unit=='kg'||unit=='g')?'g':(unit=='l'||unit=='ml')?'ml':'pcs';
+                base=(unit=='kg'||unit=='g')?'g':(unit=='l'||unit=='ml')?'ml':'pcs';
                 final created=await db.from('ingredients').insert({'name':ingredientName,'normalized_name':normalized,'base_unit':base,'needs_review':true}).select('id').single();
                 id=created['id'].toString();
-              }else{id=matches.first['id'].toString();}
+              }else{
+                id=matches.first['id'].toString();
+                base=matches.first['base_unit'].toString();
+              }
+              final allowedUnits=base=='g'?['g','kg']:base=='ml'?['ml','l']:['pcs'];
+              if(!allowedUnits.contains(unit))continue;
               await db.from('ingredient_prices').upsert({
                 'ingredient_id':id,'purchase_price':p,'purchase_quantity':q,'purchase_unit':unit,
                 'updated_at':DateTime.now().toUtc().toIso8601String(),'updated_by':db.auth.currentUser?.id,
