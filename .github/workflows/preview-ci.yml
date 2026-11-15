@@ -1,0 +1,33 @@
+name: Preview Flutter validation
+on:
+  push:
+    branches:
+      - feature/local-tesseract-ocr
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.4'
+          channel: stable
+          cache: true
+      - name: Resolve packages
+        run: flutter pub get
+      - name: Analyze
+        run: flutter analyze
+      - name: Build isolated web preview
+        run: |
+          flutter build web --release \
+            --dart-define=RECIPE_PREVIEW=true \
+            --dart-define=SUPABASE_URL=https://lpuzgzgyxqfwnwpfbefw.supabase.co \
+            --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_VSsRlb6ITGZrWa6oz70HsQ_mQkfJfJi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vslast-recipe-preview-web
+          path: build/web
+          if-no-files-found: error
