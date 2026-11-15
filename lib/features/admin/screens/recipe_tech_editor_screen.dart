@@ -59,19 +59,20 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
     double cost=0;bool allPrices=lines.isNotEmpty;bool nutritionComplete=lines.isNotEmpty;bool estimated=false;
     double calories=0,protein=0,fat=0,carbs=0;
     for(final line in lines){
-      final q=number(line.quantity);final ingredient=line.ingredient;
-      if(q==null||q<=0){allPrices=false;nutritionComplete=false;continue;}
+      final q=number(line.quantity);final loss=number(line.lossPercent)??0;final ingredient=line.ingredient;
+      if(q==null||q<=0||loss<0||loss>100){allPrices=false;nutritionComplete=false;continue;}
+      final net=q*(1-loss/100);
       final prices=ingredient['ingredient_prices'] as List? ?? [];
       final price=prices.isEmpty?null:Map<String,dynamic>.from(prices.first as Map)['price_per_base_unit'] as num?;
       if(price==null)allPrices=false;else cost+=q*price;
       if(ingredient['needs_review']==true)estimated=true;
-      if(ingredient['base_unit']!='g'||['calories_per_100','protein_per_100','fat_per_100','carbs_per_100'].any((k)=>ingredient[k]==null)){
+      if(!['g','ml'].contains(ingredient['base_unit'])||['calories_per_100','protein_per_100','fat_per_100','carbs_per_100'].any((k)=>ingredient[k]==null)){
         nutritionComplete=false;
       }else{
-        calories+=q/100*(ingredient['calories_per_100'] as num).toDouble();
-        protein+=q/100*(ingredient['protein_per_100'] as num).toDouble();
-        fat+=q/100*(ingredient['fat_per_100'] as num).toDouble();
-        carbs+=q/100*(ingredient['carbs_per_100'] as num).toDouble();
+        calories+=net/100*(ingredient['calories_per_100'] as num).toDouble();
+        protein+=net/100*(ingredient['protein_per_100'] as num).toDouble();
+        fat+=net/100*(ingredient['fat_per_100'] as num).toDouble();
+        carbs+=net/100*(ingredient['carbs_per_100'] as num).toDouble();
       }
     }
     final y=number(yieldController);
@@ -87,7 +88,7 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
     if(name.text.trim().isEmpty||lines.isEmpty||number(yieldController)==null||number(yieldController)!<=0){
       setState(()=>error='Укажите название, выход и добавьте ингредиенты.');return;
     }
-    if(lines.any((x)=>number(x.quantity)==null||number(x.quantity)!<=0)){
+    if(lines.any((x)=>number(x.quantity)==null||number(x.quantity)!<=0||(number(x.lossPercent)??0)<0||(number(x.lossPercent)??0)>100)){
       setState(()=>error='Проверьте количество каждого ингредиента.');return;
     }
     setState(() { saving=true; error=null; });
@@ -100,10 +101,10 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
         'nutrition_status':calc['nutrition_status'],'calculation_status':calc['calculation_status'],'source_photo_count':0,'created_by':db.auth.currentUser?.id
       }).select('id').single();
       final rows=lines.asMap().entries.map((entry){
-        final line=entry.value;final ingredient=line.ingredient;final q=number(line.quantity)!;
+        final line=entry.value;final ingredient=line.ingredient;final q=number(line.quantity)!;final loss=number(line.lossPercent)??0;
         final prices=ingredient['ingredient_prices'] as List? ?? [];
         final per=prices.isEmpty?null:Map<String,dynamic>.from(prices.first as Map)['price_per_base_unit'] as num?;
-        return {'recipe_id':card['id'],'ingredient_id':ingredient['id'],'ingredient_name_snapshot':ingredient['name'],'quantity':q,'net_quantity':q,'unit':ingredient['base_unit'],'line_cost':per==null?null:q*per,'sort_order':entry.key};
+        return {'recipe_id':card['id'],'ingredient_id':ingredient['id'],'ingredient_name_snapshot':ingredient['name'],'quantity':q,'net_quantity':q*(1-loss/100),'loss_percent':loss,'unit':ingredient['base_unit'],'line_cost':per==null?null:q*per,'sort_order':entry.key};
       }).toList();
       await db.from('recipe_tech_card_items').insert(rows);
       if(!mounted)return;
@@ -133,10 +134,12 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
         _section('Ингредиенты',Column(crossAxisAlignment:CrossAxisAlignment.start,children:[
           if(lines.isEmpty)const Text('Добавьте ингредиенты из справочника. Для каждого укажите количество в базовой единице.',style:TextStyle(color:muted)),
           ...lines.asMap().entries.map((entry){final i=entry.key;final line=entry.value;final prices=line.ingredient['ingredient_prices'] as List? ?? [];final per=prices.isEmpty?null:Map<String,dynamic>.from(prices.first as Map)['price_per_base_unit'] as num?;return Padding(padding:const EdgeInsets.only(bottom:10),child:Row(children:[
-            Expanded(flex:4,child:Text(line.ingredient['name'].toString(),style:const TextStyle(color:dark,fontWeight:FontWeight.w600))),
-            SizedBox(width:92,child:TextField(controller:line.quantity,keyboardType:const TextInputType.numberWithOptions(decimal:true),onChanged:(_)=>setState((){}),decoration:InputDecoration(isDense:true,suffixText:unitName(line.ingredient['base_unit'].toString()),border:const OutlineInputBorder()))),
-            const SizedBox(width:8),
-            SizedBox(width:76,child:Text(per==null?'нет цены':money(number(line.quantity)==null?0:number(line.quantity)!*per)+' ₽',textAlign:TextAlign.end,style:TextStyle(fontSize:11,color:per==null?Colors.red:muted))),
+            Expanded(flex:3,child:Column(crossAxisAlignment:CrossAxisAlignment.start,children:[Text(line.ingredient['name'].toString(),style:const TextStyle(color:dark,fontWeight:FontWeight.w600)),Text('Нетто: '+(number(line.quantity)==null?'—':money(number(line.quantity)!*(1-(number(line.lossPercent)??0)/100))+' '+unitName(line.ingredient['base_unit'].toString())),style:const TextStyle(color:muted,fontSize:10))])),
+            SizedBox(width:84,child:TextField(controller:line.quantity,keyboardType:const TextInputType.numberWithOptions(decimal:true),onChanged:(_)=>setState((){}),decoration:InputDecoration(isDense:true,labelText:'Брутто',suffixText:unitName(line.ingredient['base_unit'].toString()),border:const OutlineInputBorder()))),
+            const SizedBox(width:5),
+            SizedBox(width:58,child:TextField(controller:line.lossPercent,keyboardType:const TextInputType.numberWithOptions(decimal:true),onChanged:(_)=>setState((){}),decoration:const InputDecoration(isDense:true,labelText:'Потери %',border:OutlineInputBorder()))),
+            const SizedBox(width:5),
+            SizedBox(width:70,child:Text(per==null?'нет цены':money(number(line.quantity)==null?0:number(line.quantity)!*per)+' ₽',textAlign:TextAlign.end,style:TextStyle(fontSize:11,color:per==null?Colors.red:muted))),
             IconButton(onPressed:()=>setState(()=>lines.removeAt(i).dispose()),icon:const Icon(Icons.close,color:muted)),
           ]));}),
           OutlinedButton.icon(onPressed:addIngredient,icon:const Icon(Icons.add),label:const Text('Добавить ингредиент')),
@@ -164,8 +167,9 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
 }
 
 class _DraftLine {
-  _DraftLine({required this.ingredient,required String quantity}):quantity=TextEditingController(text:quantity);
+  _DraftLine({required this.ingredient,required String quantity}):quantity=TextEditingController(text:quantity),lossPercent=TextEditingController(text:'0');
   final Map<String,dynamic> ingredient;
   final TextEditingController quantity;
-  void dispose()=>quantity.dispose();
+  final TextEditingController lossPercent;
+  void dispose(){quantity.dispose();lossPercent.dispose();}
 }
