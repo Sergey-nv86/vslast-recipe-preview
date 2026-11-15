@@ -95,7 +95,7 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
     try{
       final calc=calculate();final nutrition=calc['nutrition'] as Map<String,double>?;
       final card=await db.from('recipe_tech_cards').insert({
-        'name':name.text.trim(),'technology':technology.text.trim(),'storage_conditions':storage.text.trim().isEmpty?null:storage.text.trim(),
+        'name':name.text.trim(),'technology':technology.text.trim(),'source_text':sourceText.text.trim().isEmpty?null:sourceText.text.trim(),'storage_conditions':storage.text.trim().isEmpty?null:storage.text.trim(),
         'yield_quantity':number(yieldController),'yield_unit':yieldUnit,'total_cost':calc['total_cost'],
         'calories_per_100':nutrition?['calories'],'protein_per_100':nutrition?['protein'],'fat_per_100':nutrition?['fat'],'carbs_per_100':nutrition?['carbs'],
         'nutrition_status':calc['nutrition_status'],'calculation_status':calc['calculation_status'],'source_photo_count':0,'created_by':db.auth.currentUser?.id

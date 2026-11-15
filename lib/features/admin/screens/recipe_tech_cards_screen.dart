@@ -18,7 +18,7 @@ class _RecipeTechCardsScreenState extends State<RecipeTechCardsScreen> {
   Future<void> load() async {
     setState((){busy=true;error=null;});
     try{
-      final data=await db.from('recipe_tech_cards').select('id,name,yield_quantity,yield_unit,total_cost,calories_per_100,protein_per_100,fat_per_100,carbs_per_100,nutrition_status,calculation_status,created_at').order('created_at',ascending:false);
+      final data=await db.from('recipe_tech_cards').select('id,name,yield_quantity,yield_unit,total_cost,calories_per_100,protein_per_100,fat_per_100,carbs_per_100,nutrition_status,calculation_status,source_text,created_at').order('created_at',ascending:false);
       if(mounted)setState(()=>cards=(data as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList());
     }catch(e){if(mounted)setState(()=>error='Не удалось загрузить карты: '+e.toString());}
     finally{if(mounted)setState(()=>busy=false);}
@@ -39,6 +39,12 @@ class _RecipeTechCardsScreenState extends State<RecipeTechCardsScreen> {
         const Divider(),
         const Text('КБЖУ на 100 г',style:TextStyle(fontWeight:FontWeight.w700,color:dark)),
         Text('К '+(card['calories_per_100']?.toString()??'—')+' · Б '+(card['protein_per_100']?.toString()??'—')+' · Ж '+(card['fat_per_100']?.toString()??'—')+' · У '+(card['carbs_per_100']?.toString()??'—'),style:const TextStyle(color:muted)),
+        if((card['source_text']??'').toString().trim().isNotEmpty)...[
+          const SizedBox(height:16),
+          const Text('Исходный текст OCR',style:TextStyle(fontWeight:FontWeight.w700,color:dark)),
+          const SizedBox(height:6),
+          SelectableText(card['source_text'].toString(),style:const TextStyle(color:muted,height:1.4)),
+        ],
       ])))));
     }catch(e){if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Не удалось открыть карту: '+e.toString())));}
   }
