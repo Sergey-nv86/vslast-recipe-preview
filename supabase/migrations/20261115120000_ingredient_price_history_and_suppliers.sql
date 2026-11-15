@@ -43,8 +43,6 @@ grant select, insert on public.ingredient_price_history to authenticated;
 create or replace function public.record_ingredient_price_history()
 returns trigger
 language plpgsql
-security definer
-set search_path = public
 as $$
 begin
   if tg_op = 'INSERT'
