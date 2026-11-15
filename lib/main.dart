@@ -20,7 +20,7 @@ import 'services/push_navigation_router.dart';
 import 'services/web_notification_helper.dart';
 import 'firebase_options.dart';
 
-const bool isRecipePreview = bool.fromEnvironment('RECIPE_PREVIEW', defaultValue: false);
+const bool isRecipePreview = bool.fromEnvironment('RECIPE_PREVIEW', defaultValue: true);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
