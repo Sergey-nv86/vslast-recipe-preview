@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -107,6 +108,61 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
     if(saved==true)await load();
   }
 
+  Future<void> importPrices() async {
+    final csv=TextEditingController(text:'ингредиент;цена;количество;единица;поставщик;источник\nМука пшеничная;70;1;kg;Поставщик;Прайс от 15.11');
+    String? importError;
+    bool importing=false;
+    final imported=await showDialog<bool>(context:context,barrierDismissible:false,builder:(ctx)=>StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(
+      title:const Text('Импорт прайс-листа'),
+      content:SizedBox(width:480,child:Column(mainAxisSize:MainAxisSize.min,children:[
+        const Text('Вставьте CSV с разделителем «;». Колонки: ингредиент; цена; количество; единица (g/kg/ml/l/pcs); поставщик; источник.',style:TextStyle(fontSize:12,color:muted)),
+        const SizedBox(height:10),
+        TextField(controller:csv,minLines:6,maxLines:12,decoration:const InputDecoration(border:OutlineInputBorder(),alignLabelWithHint:true)),
+        if(importError!=null)Padding(padding:const EdgeInsets.only(top:8),child:Text(importError!,style:const TextStyle(color:Colors.red,fontSize:12))),
+      ])),
+      actions:[
+        TextButton(onPressed:importing?null:()=>Navigator.pop(ctx,false),child:const Text('Отмена')),
+        FilledButton(style:FilledButton.styleFrom(backgroundColor:brown),onPressed:importing?null:() async {
+          refresh(() { importing=true; importError=null; });
+          try{
+            final lines=const LineSplitter().convert(csv.text).where((x)=>x.trim().isNotEmpty&&!x.trimLeft().startsWith('#')).toList();
+            var count=0;
+            for(final line in lines){
+              final parts=line.split(';').map((x)=>x.trim()).toList();
+              if(parts.length<4)continue;
+              if(parts[0].toLowerCase().contains('ингредиент')||parts[0].toLowerCase()=='name')continue;
+              final ingredientName=parts[0];
+              final p=double.tryParse(parts[1].replaceAll(',','.'));
+              final q=double.tryParse(parts[2].replaceAll(',','.'));
+              final unit=parts[3].toLowerCase();
+              if(ingredientName.isEmpty||p==null||p<0||q==null||q<=0||!['g','kg','ml','l','pcs'].contains(unit))continue;
+              final normalized=normalize(ingredientName);
+              final matches=await db.from('ingredients').select('id,base_unit').eq('normalized_name',normalized).limit(1);
+              String id;
+              if((matches as List).isEmpty){
+                final base=(unit=='kg'||unit=='g')?'g':(unit=='l'||unit=='ml')?'ml':'pcs';
+                final created=await db.from('ingredients').insert({'name':ingredientName,'normalized_name':normalized,'base_unit':base,'needs_review':true}).select('id').single();
+                id=created['id'].toString();
+              }else{id=matches.first['id'].toString();}
+              await db.from('ingredient_prices').upsert({
+                'ingredient_id':id,'purchase_price':p,'purchase_quantity':q,'purchase_unit':unit,
+                'updated_at':DateTime.now().toUtc().toIso8601String(),'updated_by':db.auth.currentUser?.id,
+                'supplier_name':parts.length>4&&parts[4].isNotEmpty?parts[4]:null,
+                'price_source':parts.length>5&&parts[5].isNotEmpty?parts[5]:null,
+              });
+              count++;
+            }
+            if(count==0){refresh(() { importing=false; importError='Не найдено корректных строк. Проверьте формат CSV.'; });return;}
+            if(ctx.mounted)Navigator.pop(ctx,true);
+            if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('Импортировано цен: '+count.toString())));
+          }catch(e){refresh(() { importing=false; importError='Ошибка импорта: '+e.toString(); });}
+        },child:Text(importing?'Импорт…':'Импортировать')),
+      ],
+    )));
+    csv.dispose();
+    if(imported==true)await load();
+  }
+
   Future<void> showHistory(Map<String,dynamic> row) async {
     try {
       final data=await db.from('ingredient_price_history').select('supplier_name,package_label,purchase_quantity,purchase_unit,purchase_price,price_per_base_unit,price_valid_from,price_source,changed_at').eq('ingredient_id',row['id']).order('changed_at',ascending:false).limit(50);
@@ -127,7 +183,7 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
     final filtered=rows.where((r)=>r['name'].toString().toLowerCase().contains(search.text.toLowerCase())).toList();
     return Scaffold(
       backgroundColor:bg,
-      appBar:AppBar(backgroundColor:bg,elevation:0,title:const Text('Справочник сырья и цен',style:TextStyle(color:dark,fontWeight:FontWeight.w700)),iconTheme:const IconThemeData(color:brown),actions:[IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),
+      appBar:AppBar(backgroundColor:bg,elevation:0,title:const Text('Справочник сырья и цен',style:TextStyle(color:dark,fontWeight:FontWeight.w700)),iconTheme:const IconThemeData(color:brown),actions:[IconButton(tooltip:'Импорт прайс-листа CSV',onPressed:importPrices,icon:const Icon(Icons.upload_file)),IconButton(onPressed:load,icon:const Icon(Icons.refresh))]),
       floatingActionButton:FloatingActionButton.extended(backgroundColor:brown,foregroundColor:Colors.white,onPressed:()=>edit(),icon:const Icon(Icons.add),label:const Text('Добавить сырьё')),
       body:Column(children:[
         Padding(padding:const EdgeInsets.fromLTRB(16,8,16,12),child:TextField(controller:search,onChanged:(_)=>setState((){}),decoration:InputDecoration(prefixIcon:const Icon(Icons.search),hintText:'Поиск ингредиента',filled:true,fillColor:Colors.white,border:OutlineInputBorder(borderRadius:BorderRadius.circular(14),borderSide:BorderSide.none)))),
