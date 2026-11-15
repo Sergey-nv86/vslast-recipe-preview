@@ -35,7 +35,7 @@ class _RecipeTechCardsScreenState extends State<RecipeTechCardsScreen> {
         Text('Выход: '+(card['yield_quantity']?.toString()??'—')+' '+(card['yield_unit']?.toString()??'')+' · Себестоимость: '+money(card['total_cost'] as num?),style:const TextStyle(color:muted)),
         const SizedBox(height:16),
         const Text('Состав',style:TextStyle(fontWeight:FontWeight.w700,color:dark)),
-        ...(data as List).map((e){final x=Map<String,dynamic>.from(e as Map);return ListTile(contentPadding:EdgeInsets.zero,title:Text(x['ingredient_name_snapshot'].toString()),subtitle:Text(x['quantity'].toString()+' '+x['unit'].toString()),trailing:Text(money(x['line_cost'] as num?)));}),
+        ...(data as List).map((e){final x=Map<String,dynamic>.from(e as Map);return ListTile(contentPadding:EdgeInsets.zero,title:Text(x['ingredient_name_snapshot'].toString()),subtitle:Text('Брутто '+x['quantity'].toString()+' '+x['unit'].toString()+' · нетто '+(x['net_quantity']?.toString()??'—')+' '+x['unit'].toString()+(x['loss_percent']==null?'':' · потери '+x['loss_percent'].toString()+'%')),trailing:Text(money(x['line_cost'] as num?)));}),
         const Divider(),
         const Text('КБЖУ на 100 г',style:TextStyle(fontWeight:FontWeight.w700,color:dark)),
         Text('К '+(card['calories_per_100']?.toString()??'—')+' · Б '+(card['protein_per_100']?.toString()??'—')+' · Ж '+(card['fat_per_100']?.toString()??'—')+' · У '+(card['carbs_per_100']?.toString()??'—'),style:const TextStyle(color:muted)),
