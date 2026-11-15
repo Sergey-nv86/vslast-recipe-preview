@@ -250,7 +250,7 @@
     const density = words.length ? letters.length / words.length : 0;
     const cyrillic = (text.match(/[А-Яа-яЁё]/g) || []).length;
     const latin = (text.match(/[A-Za-z]/g) || []).length;
-    const numericTokens = (text.match(/\\b\\d+(?:[.,]\\d+)?\\s*(?:г|гр|кг|мл|л|шт|°c|°с)\\b/gi) || []).length;
+    const numericTokens = (text.match(/\b\d+(?:[.,]\d+)?\s*(?:г|гр|кг|мл|л|шт|°c|°с)\b/gi) || []).length;
     const brokenTokens = words.filter(function (word) {
       return word.length === 1 && !/^[0-9]$/.test(word);
     }).length;

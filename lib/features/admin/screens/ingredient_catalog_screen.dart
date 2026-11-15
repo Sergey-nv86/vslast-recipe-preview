@@ -50,7 +50,7 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
       content:SizedBox(width:440,child:SingleChildScrollView(child:Column(mainAxisSize:MainAxisSize.min,children:[
         TextField(controller:name,decoration:const InputDecoration(labelText:'Название ингредиента',border:OutlineInputBorder())),
         const SizedBox(height:9),
-        DropdownButtonFormField<String>(initialValue:base,decoration:const InputDecoration(labelText:'Базовая единица',border:OutlineInputBorder()),items:const [DropdownMenuItem(value:'g',child:Text('грамм')),DropdownMenuItem(value:'ml',child:Text('миллилитр')),DropdownMenuItem(value:'pcs',child:Text('штука'))],onChanged:(v)=>refresh(()=>{base=v??base,purchaseUnit=base=='ml'?'l':base=='pcs'?'pcs':'kg'})),
+        DropdownButtonFormField<String>(initialValue:base,decoration:const InputDecoration(labelText:'Базовая единица',border:OutlineInputBorder()),items:const [DropdownMenuItem(value:'g',child:Text('грамм')),DropdownMenuItem(value:'ml',child:Text('миллилитр')),DropdownMenuItem(value:'pcs',child:Text('штука'))],onChanged:(v)=>refresh((){base=v??base;purchaseUnit=base=='ml'?'l':base=='pcs'?'pcs':'kg';})),
         const SizedBox(height:14),
         const Align(alignment:Alignment.centerLeft,child:Text('Закупочная цена',style:TextStyle(fontWeight:FontWeight.w700,color:dark))),
         const SizedBox(height:7),
