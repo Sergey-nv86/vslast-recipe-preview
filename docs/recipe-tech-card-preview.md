@@ -65,6 +65,22 @@ flutter run \
 
 For iPhone installation, open `ios/Runner.xcworkspace` in Xcode, select the iPhone and a valid Apple development signing team, then run the same preview build. A signed iOS build requires the user's Apple signing identity.
 
+### Deploy the web preview to the isolated Firebase Hosting site
+
+Run these commands from the root of this repository after signing in to Firebase CLI. Do not use the production app repository or its Firebase configuration.
+
+```bash
+flutter pub get
+flutter build web --release \\
+  --dart-define=RECIPE_PREVIEW=true \\
+  --dart-define=SUPABASE_URL=https://lpuzgzgyxqfwnwpfbefw.supabase.co \\
+  --dart-define=SUPABASE_PUBLISHABLE_KEY=sb_publishable_VSsRlb6ITGZrWa6oz70HsQ_mQkfJfJi
+firebase deploy --only hosting --project vslast-recipe-tech --config firebase.recipe-preview.json
+```
+
+The deploy command targets only the isolated preview Firebase project `vslast-recipe-tech`. It does not deploy Cloud Functions, database migrations, or any production Firebase resources.
+
+
 The first registration may require email confirmation depending on the Auth email settings. The profile trigger assigns owner only to the first account in this isolated preview project; the function is not executable through the public Data API. After confirmation, sign in with the same test email/password. No production users or data are present in this project.
 
 ## Remaining before iPhone OCR acceptance
