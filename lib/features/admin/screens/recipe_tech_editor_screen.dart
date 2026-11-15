@@ -44,7 +44,7 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
     final accepted=await showDialog<bool>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(
       title:const Text('Добавить ингредиент'),
       content:Column(mainAxisSize:MainAxisSize.min,children:[
-        DropdownButtonFormField<String>(initialValue:selected!['id'].toString(),isExpanded:true,decoration:const InputDecoration(labelText:'Ингредиент',border:OutlineInputBorder()),items:catalog.map((x)=>DropdownMenuItem(value:x['id'].toString(),child:Text(x['name'].toString(),overflow:TextOverflow.ellipsis))).toList(),onChanged:(id)=>refresh(()=>selected=catalog.firstWhere((x)=>x['id'].toString()==id))),
+        DropdownButtonFormField<String>(initialValue:selected['id'].toString(),isExpanded:true,decoration:const InputDecoration(labelText:'Ингредиент',border:OutlineInputBorder()),items:catalog.map((x)=>DropdownMenuItem(value:x['id'].toString(),child:Text(x['name'].toString(),overflow:TextOverflow.ellipsis))).toList(),onChanged:(id)=>refresh(()=>selected=catalog.firstWhere((x)=>x['id'].toString()==id))),
         const SizedBox(height:10),
         TextField(controller:quantity,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:InputDecoration(labelText:'Количество, '+unitName(selected['base_unit'].toString()),border:const OutlineInputBorder())),
       ]),
