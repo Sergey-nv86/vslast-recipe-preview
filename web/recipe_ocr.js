@@ -50,7 +50,7 @@
         pages.push('Страница ' + (index + 1) + '\n' + text);
       }
 
-      return pages.join('\\n\\n');
+      return pages.join('\n\n');
     } finally {
       // Release the WebAssembly heap after each batch to reduce memory
       // pressure in iOS Safari. Tesseract caches the trained language data.
