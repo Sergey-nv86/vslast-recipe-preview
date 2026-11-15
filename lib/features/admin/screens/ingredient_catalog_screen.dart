@@ -20,7 +20,7 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
   Future<void> load() async {
     setState((){busy=true;error=null;});
     try{
-      final data=await db.from('ingredients').select('id,name,normalized_name,base_unit,calories_per_100,protein_per_100,fat_per_100,carbs_per_100,nutrition_source,needs_review,ingredient_prices(purchase_price,purchase_quantity,purchase_unit,price_per_base_unit,updated_at)').order('name');
+      final data=await db.from('ingredients').select('id,name,normalized_name,base_unit,calories_per_100,protein_per_100,fat_per_100,carbs_per_100,nutrition_source,needs_review,ingredient_prices(purchase_price,purchase_quantity,purchase_unit,price_per_base_unit,updated_at,supplier_name,price_source,price_valid_from,package_label)').order('name');
       if(mounted)setState(()=>rows=(data as List).map((e)=>Map<String,dynamic>.from(e as Map)).toList());
     }catch(e){if(mounted)setState(()=>error='Не удалось загрузить справочник: '+e.toString());}
     finally{if(mounted)setState(()=>busy=false);}
@@ -39,10 +39,13 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
     final carbs=TextEditingController(text:row?['carbs_per_100']?.toString()??'');
     final source=TextEditingController(text:row?['nutrition_source']?.toString()??'');
     final priceRows=row?['ingredient_prices'] as List? ?? [];
-    if(priceRows.isNotEmpty){final p=Map<String,dynamic>.from(priceRows.first as Map);price.text=p['purchase_price']?.toString()??'';pack.text=p['purchase_quantity']?.toString()??'1';}
+    final currentPrice=priceRows.isEmpty?null:Map<String,dynamic>.from(priceRows.first as Map);
+    final supplier=TextEditingController(text:currentPrice?['supplier_name']?.toString()??'');
+    final priceSource=TextEditingController(text:currentPrice?['price_source']?.toString()??'');
+    if(currentPrice!=null){price.text=currentPrice['purchase_price']?.toString()??'';pack.text=currentPrice['purchase_quantity']?.toString()??'1';}
     String base=row?['base_unit']?.toString()??'g';
     String purchaseUnit=base=='ml'?'l':base=='pcs'?'pcs':'kg';
-    if(priceRows.isNotEmpty)purchaseUnit=Map<String,dynamic>.from(priceRows.first as Map)['purchase_unit']?.toString()??purchaseUnit;
+    if(currentPrice!=null)purchaseUnit=currentPrice['purchase_unit']?.toString()??purchaseUnit;
     bool review=row?['needs_review']!=false;
     String? formError;
     final saved=await showDialog<bool>(context:context,barrierDismissible:false,builder:(ctx)=>StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(
@@ -61,6 +64,10 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
           const SizedBox(width:8),
           Expanded(child:DropdownButtonFormField<String>(initialValue:purchaseUnit,decoration:const InputDecoration(labelText:'Единица',border:OutlineInputBorder()),items:(base=='ml'?['ml','l']:base=='pcs'?['pcs']:['g','kg']).map((v)=>DropdownMenuItem(value:v,child:Text(v))).toList(),onChanged:(v)=>refresh(()=>purchaseUnit=v??purchaseUnit))),
         ]),
+        const SizedBox(height:7),
+        TextField(controller:supplier,decoration:const InputDecoration(labelText:'Поставщик',border:OutlineInputBorder())),
+        const SizedBox(height:7),
+        TextField(controller:priceSource,decoration:const InputDecoration(labelText:'Источник/номер прайса',border:OutlineInputBorder())),
         const SizedBox(height:14),
         const Align(alignment:Alignment.centerLeft,child:Text('Пищевая ценность на 100 г/мл',style:TextStyle(fontWeight:FontWeight.w700,color:dark))),
         const SizedBox(height:7),
@@ -90,14 +97,29 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
             final payload={'name':n,'normalized_name':normalize(n),'base_unit':base,'calories_per_100':parse(kcal),'protein_per_100':parse(protein),'fat_per_100':parse(fat),'carbs_per_100':parse(carbs),'nutrition_source':source.text.trim().isEmpty?null:source.text.trim(),'needs_review':review,'updated_at':DateTime.now().toUtc().toIso8601String()};
             final id=row==null?(await db.from('ingredients').insert(payload).select('id').single())['id'].toString():row['id'].toString();
             if(row!=null)await db.from('ingredients').update(payload).eq('id',id);
-            if(price.text.trim().isNotEmpty&&p!=null&&q!=null)await db.from('ingredient_prices').upsert({'ingredient_id':id,'purchase_price':p,'purchase_quantity':q,'purchase_unit':purchaseUnit,'updated_at':DateTime.now().toUtc().toIso8601String(),'updated_by':db.auth.currentUser?.id});
+            if(price.text.trim().isNotEmpty&&p!=null&&q!=null)await db.from('ingredient_prices').upsert({'ingredient_id':id,'purchase_price':p,'purchase_quantity':q,'purchase_unit':purchaseUnit,'updated_at':DateTime.now().toUtc().toIso8601String(),'updated_by':db.auth.currentUser?.id,'supplier_name':supplier.text.trim().isEmpty?null:supplier.text.trim(),'price_source':priceSource.text.trim().isEmpty?null:priceSource.text.trim()});
             if(ctx.mounted)Navigator.pop(ctx,true);
           }catch(e){refresh(()=>formError='Не удалось сохранить: '+e.toString());}
         },child:const Text('Сохранить')),
       ],
     )));
-    for(final c in [name,price,pack,kcal,protein,fat,carbs,source]){c.dispose();}
+    for(final c in [name,price,pack,kcal,protein,fat,carbs,source,supplier,priceSource]){c.dispose();}
     if(saved==true)await load();
+  }
+
+  Future<void> showHistory(Map<String,dynamic> row) async {
+    try {
+      final data=await db.from('ingredient_price_history').select('supplier_name,package_label,purchase_quantity,purchase_unit,purchase_price,price_per_base_unit,price_valid_from,price_source,changed_at').eq('ingredient_id',row['id']).order('changed_at',ascending:false).limit(50);
+      if(!mounted)return;
+      await showModalBottomSheet<void>(context:context,isScrollControlled:true,backgroundColor:bg,builder:(ctx)=>SafeArea(child:Padding(padding:const EdgeInsets.all(18),child:Column(mainAxisSize:MainAxisSize.min,crossAxisAlignment:CrossAxisAlignment.start,children:[
+        Text('История цен · '+row['name'].toString(),style:const TextStyle(fontSize:18,fontWeight:FontWeight.w700,color:dark)),
+        const SizedBox(height:12),
+        if((data as List).isEmpty)const Text('История пока пуста. Новые изменения будут записываться автоматически.'),
+        SizedBox(height:360,child:ListView(shrinkWrap:true,children:data.map((e){final x=Map<String,dynamic>.from(e as Map);return ListTile(contentPadding:EdgeInsets.zero,title:Text(money(x['purchase_price'] as num?)+' за упаковку'),subtitle:Text((x['supplier_name']??'Поставщик не указан').toString()+' · '+x['purchase_quantity'].toString()+' '+x['purchase_unit'].toString()+' · '+(x['price_valid_from']??'').toString()),trailing:Text((x['changed_at']??'').toString().substring(0,10),style:const TextStyle(fontSize:11,color:muted)));}).toList())),
+      ]))));
+    } catch(e) {
+      if(mounted)ScaffoldMessenger.of(context).showSnackBar(SnackBar(content:Text('История цен доступна после применения миграции: '+e.toString())));
+    }
   }
 
   @override
@@ -112,8 +134,9 @@ class _IngredientCatalogScreenState extends State<IngredientCatalogScreen> {
         Expanded(child:busy?const Center(child:CircularProgressIndicator(color:brown)):error!=null?Center(child:Padding(padding:const EdgeInsets.all(24),child:Text(error!,textAlign:TextAlign.center))):filtered.isEmpty?const Center(child:Text('Справочник пуст. Добавьте первое сырьё.')):RefreshIndicator(onRefresh:load,child:ListView.builder(padding:const EdgeInsets.fromLTRB(16,0,16,90),itemCount:filtered.length,itemBuilder:(ctx,i){
           final r=filtered[i];final prices=r['ingredient_prices'] as List? ?? [];final pr=prices.isEmpty?null:Map<String,dynamic>.from(prices.first as Map);final per=pr?['price_per_base_unit'] as num?;final unit=r['base_unit']=='ml'?'мл':r['base_unit']=='pcs'?'шт':'г';final priceKg=r['base_unit']=='g'&&per!=null?per*1000:null;
           final priceText=priceKg==null?(per==null?'не задана':money(per)+'/'+unit):money(priceKg)+'/кг';
+          final supplierText=pr?['supplier_name']?.toString()??'';
           final nutritionText=r['calories_per_100']==null?'нет данных':'заполнено';
-          return Card(color:Colors.white,elevation:0,margin:const EdgeInsets.only(bottom:9),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15),side:const BorderSide(color:Color(0xFFEADFD5))),child:ListTile(onTap:()=>edit(r),title:Text(r['name'].toString(),style:const TextStyle(color:dark,fontWeight:FontWeight.w700)),subtitle:Padding(padding:const EdgeInsets.only(top:5),child:Text('Цена: '+priceText+' · КБЖУ: '+nutritionText+(r['needs_review']==true?' · проверить':''),style:const TextStyle(color:muted,fontSize:12))),trailing:const Icon(Icons.edit_outlined,color:brown)));
+          return Card(color:Colors.white,elevation:0,margin:const EdgeInsets.only(bottom:9),shape:RoundedRectangleBorder(borderRadius:BorderRadius.circular(15),side:const BorderSide(color:Color(0xFFEADFD5))),child:ListTile(onTap:()=>edit(r),title:Text(r['name'].toString(),style:const TextStyle(color:dark,fontWeight:FontWeight.w700)),subtitle:Padding(padding:const EdgeInsets.only(top:5),child:Text('Цена: '+priceText+' · КБЖУ: '+nutritionText+(supplierText.isEmpty?'':' · '+supplierText)+(r['needs_review']==true?' · проверить':''),style:const TextStyle(color:muted,fontSize:12))),trailing:IconButton(tooltip:'История цен',onPressed:()=>showHistory(r),icon:const Icon(Icons.history,color:brown))));
         }))),
       ]),
     );
