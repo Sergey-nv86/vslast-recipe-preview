@@ -153,34 +153,61 @@
 
     // A wide heading or full-width instruction separates page bands.
     const spanning = lines.filter(function (line) {
-      return line.x1 - line.x0 >= pageWidth * 0.58;
+      return line.x1 - line.x0 >= pageWidth * 0.68;
     });
     const ordered = [];
     let band = [];
 
     function flushBand() {
       if (!band.length) return;
-      const left = [];
-      const right = [];
-      band.forEach(function (line) {
-        const center = (line.x0 + line.x1) / 2;
-        (center < pageWidth * 0.5 ? left : right).push(line);
-      });
-      const hasTwoColumns = left.length >= 2 && right.length >= 2 &&
-        Math.abs(
-          left.reduce(function (sum, line) {
-            return sum + (line.x0 + line.x1) / 2;
-          }, 0) / left.length -
-          right.reduce(function (sum, line) {
-            return sum + (line.x0 + line.x1) / 2;
-          }, 0) / right.length
-        ) > pageWidth * 0.2;
+      // Find the page gutter from actual line geometry. The old fixed 50% split
+      // failed on asymmetric scans, wide margins and recipes with narrow columns.
+      let bestSplit = null;
+      let bestScore = -1;
+      const minSplit = Math.round(pageWidth * 0.28);
+      const maxSplit = Math.round(pageWidth * 0.72);
+      const step = Math.max(8, Math.round(pageWidth * 0.015));
+      for (let split = minSplit; split <= maxSplit; split += step) {
+        const left = band.filter(line => line.x1 <= split - pageWidth * 0.012);
+        const right = band.filter(line => line.x0 >= split + pageWidth * 0.012);
+        if (left.length < 2 || right.length < 2) continue;
+        const leftEdge = Math.max.apply(null, left.map(line => line.x1));
+        const rightEdge = Math.min.apply(null, right.map(line => line.x0));
+        const gutter = Math.max(0, rightEdge - leftEdge);
+        const balance = Math.min(left.length, right.length) / Math.max(left.length, right.length);
+        const score = (left.length + right.length) + balance * 4 + Math.min(8, gutter / pageWidth * 20);
+        if (score > bestScore) {
+          bestScore = score;
+          bestSplit = split;
+        }
+      }
 
-      if (hasTwoColumns) {
+      if (bestSplit !== null) {
+        const left = [];
+        const right = [];
+        const ambiguous = [];
+        band.forEach(function (line) {
+          if (line.x1 <= bestSplit) left.push(line);
+          else if (line.x0 >= bestSplit) right.push(line);
+          else ambiguous.push(line);
+        });
         left.sort(function (a, b) { return a.y0 - b.y0; });
         right.sort(function (a, b) { return a.y0 - b.y0; });
-        ordered.push.apply(ordered, left);
-        ordered.push.apply(ordered, right);
+        // Lines crossing the gutter are usually captions or wrapped rows.
+        // Keep them in vertical order after the closest preceding column line.
+        const merged = left.map(line => ({ line: line, side: 0 }))
+          .concat(right.map(line => ({ line: line, side: 1 })));
+        ambiguous.sort(function (a, b) { return a.y0 - b.y0; });
+        ambiguous.forEach(function (line) {
+          const center = (line.x0 + line.x1) / 2;
+          merged.push({ line: line, side: center < bestSplit ? 0 : 1, ambiguous: true });
+        });
+        merged.sort(function (a, b) {
+          if (a.ambiguous && b.ambiguous) return a.line.y0 - b.line.y0;
+          if (a.side !== b.side) return a.side - b.side;
+          return a.line.y0 - b.line.y0;
+        });
+        ordered.push.apply(ordered, merged.map(item => item.line));
       } else {
         band.sort(function (a, b) {
           return a.y0 === b.y0 ? a.x0 - b.x0 : a.y0 - b.y0;
@@ -189,7 +216,6 @@
       }
       band = [];
     }
-
     lines.forEach(function (line) {
       if (spanning.indexOf(line) !== -1) {
         flushBand();
@@ -222,9 +248,17 @@
     const suspicious = text.match(/[|~^]{2,}|[^А-Яа-яЁёA-Za-z0-9\s.,:;!?()/%+№°-]/g) || [];
     const confidence = Number(result.data.confidence) || 0;
     const density = words.length ? letters.length / words.length : 0;
-    const penalty = Math.min(18, suspicious.length * 0.7);
-    const structure = Math.min(8, lines.length * 0.12) +
-      Math.min(8, words.length * 0.035) + Math.min(5, density * 1.5);
+    const cyrillic = (text.match(/[А-Яа-яЁё]/g) || []).length;
+    const latin = (text.match(/[A-Za-z]/g) || []).length;
+    const numericTokens = (text.match(/\\b\\d+(?:[.,]\\d+)?\\s*(?:г|гр|кг|мл|л|шт|°c|°с)\\b/gi) || []).length;
+    const brokenTokens = words.filter(function (word) {
+      return word.length === 1 && !/^[0-9]$/.test(word);
+    }).length;
+    const languageRatio = letters.length ? cyrillic / letters.length : 0;
+    const penalty = Math.min(24, suspicious.length * 0.9 + brokenTokens * 0.35);
+    const structure = Math.min(7, lines.length * 0.1) +
+      Math.min(7, words.length * 0.03) + Math.min(5, density * 1.4) +
+      Math.min(5, numericTokens * 0.7) + languageRatio * 4 - Math.min(3, latin * 0.08);
     return {
       text: text,
       score: confidence + structure - penalty,
@@ -249,7 +283,7 @@
     scale = Math.min(scale, MAX_IMAGE_WIDTH / sourceWidth);
     const processedWidth = Math.max(1, Math.round(sourceWidth * scale));
     const enhanced = makeCanvas(image, false);
-    const modes = [3, 11, 6];
+    const modes = [3, 4, 11, 6];
     let best = { text: '', score: -1, confidence: 0 };
 
     for (const mode of modes) {

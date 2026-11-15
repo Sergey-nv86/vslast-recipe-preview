@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import 'admin_recipe_tech_screen.dart';
+import 'recipe_workspace_home_screen.dart';
 
 class RecipePreviewLoginScreen extends StatefulWidget {
   const RecipePreviewLoginScreen({super.key});
@@ -94,7 +94,7 @@ class _RecipePreviewLoginScreenState extends State<RecipePreviewLoginScreen> {
       }
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const AdminRecipeTechScreen()),
+        MaterialPageRoute(builder: (_) => const RecipeWorkspaceHomeScreen()),
       );
     } catch (e) {
       if (mounted) setState(() => _message = 'Не удалось проверить профиль: $e');
