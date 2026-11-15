@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feature/local-tesseract-ocr
+      - feature/ocr-layout-order-20261115
   workflow_dispatch:
 permissions:
   contents: read
