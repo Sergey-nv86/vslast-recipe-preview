@@ -39,7 +39,7 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
 
   Future<void> addIngredient() async {
     if(catalog.isEmpty){ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Сначала заполните справочник сырья')));return;}
-    Map<String,dynamic>? selected=catalog.first;
+    Map<String,dynamic> selected=catalog.first;
     final quantity=TextEditingController(text:'100');
     final accepted=await showDialog<bool>(context:context,builder:(ctx)=>StatefulBuilder(builder:(ctx,refresh)=>AlertDialog(
       title:const Text('Добавить ингредиент'),
@@ -51,12 +51,12 @@ class _RecipeTechEditorScreenState extends State<RecipeTechEditorScreen> {
       actions:[TextButton(onPressed:()=>Navigator.pop(ctx,false),child:const Text('Отмена')),FilledButton(style:FilledButton.styleFrom(backgroundColor:brown),onPressed:()=>Navigator.pop(ctx,true),child:const Text('Добавить'))],
     )));
     final q=number(quantity);quantity.dispose();
-    if(accepted!=true||selected==null||q==null||q<=0)return;
-    setState(()=>lines.add(_DraftLine(ingredient:selected!,quantity:q.toString())));
+    if(accepted!=true||q==null||q<=0)return;
+    setState(()=>lines.add(_DraftLine(ingredient:selected,quantity:q.toString())));
   }
 
   Map<String,dynamic> calculate() {
-    double cost=0;bool allPrices=true;bool nutritionComplete=lines.isNotEmpty;bool estimated=false;
+    double cost=0;bool allPrices=lines.isNotEmpty;bool nutritionComplete=lines.isNotEmpty;bool estimated=false;
     double calories=0,protein=0,fat=0,carbs=0;
     for(final line in lines){
       final q=number(line.quantity);final ingredient=line.ingredient;
