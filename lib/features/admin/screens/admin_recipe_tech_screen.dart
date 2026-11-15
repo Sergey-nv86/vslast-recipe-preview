@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import '../services/recipe_tech_service.dart';
 import '../services/local_recipe_ocr_service.dart';
+import 'recipe_tech_editor_screen.dart';
 
 class AdminRecipeTechScreen extends StatefulWidget {
   const AdminRecipeTechScreen({super.key});
@@ -263,6 +264,14 @@ class _AdminRecipeTechScreenState extends State<AdminRecipeTechScreen> {
               ),
             ),
           ),
+        ],
+        if (ocrController.text.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          SizedBox(width: double.infinity, child: OutlinedButton.icon(
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RecipeTechEditorScreen(initialText: ocrController.text))),
+            icon: const Icon(Icons.edit_note_outlined),
+            label: const Text('Создать технологическую карту из этого текста'),
+          )),
         ],
         if (analysis != null) ...[
           const SizedBox(height: 16),

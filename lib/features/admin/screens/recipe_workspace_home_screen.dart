@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'admin_recipe_tech_screen.dart';
 import 'ingredient_catalog_screen.dart';
 import 'recipe_tech_cards_screen.dart';
+import 'recipe_tech_editor_screen.dart';
 
 class RecipeWorkspaceHomeScreen extends StatelessWidget {
   const RecipeWorkspaceHomeScreen({super.key});
@@ -25,6 +26,7 @@ class RecipeWorkspaceHomeScreen extends StatelessWidget {
       const SizedBox(height: 18),
       _Tile(icon: Icons.document_scanner_outlined, title: 'Распознать рецепт', subtitle: 'Фотографии, локальный OCR и проверка распознанного текста', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const AdminRecipeTechScreen()))),
       _Tile(icon: Icons.inventory_2_outlined, title: 'Справочник сырья и цен', subtitle: 'Ингредиенты, закупочная цена, пищевая ценность и единицы измерения', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const IngredientCatalogScreen()))),
+      _Tile(icon: Icons.edit_note_outlined, title: 'Создать технологическую карту', subtitle: 'Ручное заполнение состава, технологии, выхода, КБЖУ и себестоимости', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipeTechEditorScreen()))),
       _Tile(icon: Icons.menu_book_outlined, title: 'Технологические карты', subtitle: 'Сохранённые рецептуры, выход, себестоимость и КБЖУ', onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const RecipeTechCardsScreen()))),
       const SizedBox(height: 12),
       const Text('Расчёты выполняются по подтверждённым данным справочника. Если цены или пищевая ценность отсутствуют, система не подставляет вымышленные значения.', style: TextStyle(color: muted, fontSize: 12, height: 1.45)),
