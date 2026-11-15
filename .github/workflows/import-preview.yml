@@ -1,0 +1,67 @@
+name: Import isolated recipe preview
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  import:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout preview repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Import recipe preview source branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          SOURCE_DIR="$(mktemp -d)"
+          git clone --depth 1 --branch feature/recipe-tech-card-ai-20261113 https://github.com/Sergey-nv86/vslast-premium.git "$SOURCE_DIR/source"
+          rsync -a "$SOURCE_DIR/source/" ./ \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.firebase/' \
+            --exclude='.firebaserc' \
+            --exclude='firebase.json' \
+            --exclude='backup_*/' \
+            --exclude='assets/images_backup/' \
+            --exclude='android/app/google-services.json' \
+            --exclude='ios/Runner/GoogleService-Info.plist' \
+            --exclude='.env' \
+            --exclude='.env.*' \
+            --exclude='build/' \
+            --exclude='.dart_tool/' \
+            --exclude='node_modules/' \
+            --exclude='supabase/.temp/'
+          cat > firebase.recipe-preview.json <<'EOF'
+          {
+            "hosting": {
+              "public": "build/web",
+              "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+              "cleanUrls": true
+            }
+          }
+          EOF
+          cat > web/pwa-service-worker.js <<'EOF'
+          'use strict';
+
+          // Isolated recipe-tech preview.
+          // No Firebase, no push notifications, no production URLs.
+          // Network-only worker; offline caching is intentionally disabled.
+          self.addEventListener('install', (event) => {
+            self.skipWaiting();
+          });
+          self.addEventListener('activate', (event) => {
+            event.waitUntil(self.clients.claim());
+          });
+          EOF
+          rm -rf "$SOURCE_DIR"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to import."
+          else
+            git commit -m "Import isolated recipe preview baseline"
+            git push origin HEAD:main
+          fi
