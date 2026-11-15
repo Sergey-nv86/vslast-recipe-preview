@@ -6,7 +6,7 @@ The current UI performs only local OCR in the browser using Tesseract.js 5.1.1 a
 
 The source branch imported from `vslast-premium` is a baseline snapshot. Uncommitted local-only changes from the Mac working tree were not present on GitHub and are not claimed as transferred.
 
-This feature is isolated on branch feature/recipe-tech-card-ai-20261113.
+This feature is isolated in repository `vslast-recipe-preview`, branch `feature/local-tesseract-ocr`.
 
 ## What it does
 
@@ -48,7 +48,7 @@ The preview Supabase project is already provisioned separately from production:
 - Organization: `snocwyuqqemdvxwkywxf`
 - Project creation estimate: USD 0/month
 
-The preview app has a dedicated email/password entry screen enabled only with `RECIPE_PREVIEW=true`. Production remains the default when no Dart defines are supplied. The first account registered in this isolated preview project receives the owner role; later accounts receive customer role. This first-account rule is specific to this unshared test project and must never be copied to production.
+The preview app has a dedicated email/password entry screen enabled only with `RECIPE_PREVIEW=true`. This repository defaults to the isolated preview Supabase project even when no Dart defines are supplied; it must never be used to build production. The first account registered in this isolated preview project receives the owner role; later accounts receive customer role. This first-account rule is specific to this unshared test project and must never be copied to production.
 
 Active publishable key for the preview app (safe for client-side use):
 `sb_publishable_VSsRlb6ITGZrWa6oz70HsQ_mQkfJfJi`
