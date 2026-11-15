@@ -47,7 +47,7 @@
 
         const result = await worker.recognize(image);
         const text = (result.data.text || '').trim();
-        pages.push('Страница ' + (index + 1) + '\\n' + text);
+        pages.push('Страница ' + (index + 1) + '\n' + text);
       }
 
       return pages.join('\\n\\n');
